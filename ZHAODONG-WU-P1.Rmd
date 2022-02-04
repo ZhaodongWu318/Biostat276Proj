@@ -800,6 +800,7 @@ $\textbf{(e)}$. Implement such algorithm in `R` and compare your results with es
 
 ```{r}
 # load packages
+library(mvtnorm)
 library(lars)
 library(MCMCpack)
 library(statmod)
@@ -808,12 +809,74 @@ library(statmod)
 data("diabetes")
 dia2e_x <- diabetes$x # matrix with 10 columns
 dia2e_y <- diabetes$y # a numerical vector
+beta_hat <- solve(t(dia2e_x) %*% dia2e_x) %*% t(dia2e_x) %*% dia2e_y
 
-# set initial values
-init_2e <- list(tau_sq = rep(10,10),
-                beta = rep(0,10),
-                sigma_sq = 0.02,
-                lambda_sq = 1)
+init_2e<- list(tau_sq = rep(10, 10),
+               beta = beta_hat,
+               sigma_sq = 0.02,
+               lambda_sq = 1)
+
+gibbs_2e <- function(init_2e,                     # initial values
+                     nsim = 1500, burn = 0.1,     # chain parameters
+                     a = 1, b = 2,                # prior
+                     X = dia2e_x, Y = dia2e_y,    # dataset
+                     seed = 1998,
+                     reg_path = FALSE, sen_analysis = FALSE){
+  set.seed(seed)
+  # initialization---------------------------------------------
+  tau_sq <- init_2e$tau_sq
+  beta <- init_2e$beta
+  sigma_sq <- init_2e$sigma_sq
+  lambda_sq <- init_2e$lambda_sq
+  
+  tau_sq.ch <- matrix(NA, nrow = nsim, ncol = 10)
+  beta.ch <- matrix(NA, nrow = nsim, ncol = 10)
+  betamean.ch <- matrix(NA, nrow = nsim, ncol = 10)
+  sigma_sq.ch <- vector()
+  
+  # Run chain---------------------------------------------------
+  nsim1 <- nsim * (1.0 + burn)
+  burni <- nsim * burn
+  
+  for (isim in 1:nsim1) {
+    # beta ~ multivariate normal
+    betamean <- solve(t(X) %*% X + diag(sigma_sq/tau_sq)) %*% t(X) %*% Y
+    betavar <- solve((t(X) %*% X)/sigma_sq + diag(1/tau_sq))
+    beta <- rmvnorm(n = 1, mean = betamean, sigma = betavar)
+    
+    # sigma_sq ~ inverse gamma
+    sigma_sq <- 1/(rgamma(1, shape = 0.1 + 442/2, 
+                       rate = 0.5 * t(Y - X %*% t(beta)) %*% (Y - X %*% t(beta)) + 10))
+    #lambda_sq
+    if(reg_path == TRUE){
+      lambda_sq <- lambda_sq
+    }else if(sen_analysis == TRUE){
+      lambda_sq <- 1/rgamma(1, a, rate = b)
+    }else{
+      lambda_sq <- rgamma(1, shape = a + 10, rate = b + sum(tau_sq)/2)
+    }
+    
+    # tau_sq
+    tau_sq <- apply(matrix(beta), 1, function(x) {
+      out <- rinvgauss(1, mean = sqrt(lambda_sq/x^2), 
+                       shape = lambda_sq)
+      return(1/out)
+    }
+    )
+    
+     if(isim > burni){
+       i1 <- isim - burni
+       betamean.ch[i1,] <- betamean
+       beta.ch[i1,] <- beta
+       sigma_sq.ch[i1] <- sigma_sq
+       tau_sq.ch[i1,] <- tau_sq
+    }
+  }
+  return(list(beta = beta.ch, sigma_sq = sigma_sq.ch, tau_sq = tau_sq.ch))
+}
+
+    
+results_gibbs_2e <- gibbs_2e(init_2e, nsim = 10000, burn = 0.1, b = 2)
 ```
 
 ```{r}
@@ -821,14 +884,77 @@ init_2e <- list(tau_sq = rep(10,10),
 library(MASS)
 library(glmnet)
 
-lasso_2e <- glmnet(dia2e_x, dia2e_y)
-cvfit_2e <- cv.glmnet(dia2e_x, dia2e_y)
-coef(cvfit_2e, s = "lambda.min")
+lasso_2e <- glmnet(dia2e_x, dia2e_y, intercept = FALSE)
+coeff_2e <- coef(lasso_2e, s = min(lasso_2e$lambda))
 
-cvfit_2e$lambda.min
-plot(lasso_2e,label = TRUE)
+# comparison
+coeff_gibbs <- apply(results_gibbs_2e$beta, 2, 
+                     function(x){quantile(x,c(0.1,0.5,0.9))})
+coeff_med <- coeff_gibbs[2, ]
+
+comparison <- tibble("MCMC-Gibbs" = coeff_med, 
+                     "Glmnet" = coeff_2e[-1])
+
+comparison
 ```
 
 $\textbf{(f)}$. For the diabetes data, fix $\lambda$ and produce a regularization path for adaptive Bayesian Lasso obtained on a grid of values for the tuning parameter $\lambda$. Describe your approach and compare your result with the path obtained using `glmnet()`.
 
-$\textbf{(g)}$. Free $\lambda$ and carry out a sensitivity analysis assessing the behavior of the posterior distribution of $\beta$ and $\sigma^2$, as hyper parameters $a$ and $b$ are changed. Explain clearly the rationale you use to assess sensitivity and provide recom- mendations for the analysis of the `diabetes` data.
+```{r}
+# fix values of lambda
+library(reshape2)
+library(plotmo)
+lambda_2f <- data.frame(lambda_sq =exp(seq(-5, 5, 0.1)))
+
+# regression_path
+test_2f <- apply(lambda_2f, 1, 
+                 function(x){
+                   init_2e$lambda_sq <- x
+                   return(gibbs_2e(init_2e,nsim = 1000, 
+                                   burn = 0.5, b = 2, reg_path = TRUE))})
+
+results_2f <- lapply(test_2f, function(x){apply(x$beta,2,median)})
+results_plot_2f <- as.data.frame(Reduce("rbind", results_2f))
+colnames(results_plot_2f) <- colnames(dia2e_x)
+results_plot_2f$lambda <- log(sqrt(lambda_2f$lambda_sq))
+results_plot_2f <- melt(results_plot_2f, id.vars = names(results_plot_2f)[11])
+```
+
+```{r}
+ggplot(results_plot_2f, aes(lambda, value, color = variable)) +
+  geom_smooth(method = loess, se = FALSE) +
+  theme_bw()
+```
+
+```{r}
+plot_glmnet(lasso_2e)
+```
+
+$\textbf{(g)}$. Free $\lambda$ and carry out a sensitivity analysis assessing the behavior of the posterior distribution of $\beta$ and $\sigma^2$, as hyper parameters $a$ and $b$ are changed. Explain clearly the rationale you use to assess sensitivity and provide recommendations for the analysis of the `diabetes` data.
+
+```{r}
+ab_2g <- data.frame(a = c(0.5,1,5,10,15),
+                    b = c(0.5,1,5,10,15))
+
+test_2g <- apply(ab_2g, 1, 
+              function(ab){
+                return(gibbs_2e(init_2e, nsim = 10000, burn = 0.1,
+                                a = ab[1], b = ab[2], sen_analysis = TRUE))})
+
+results_2g <- lapply(test_2g, function(x){apply(x$beta, 2,
+                                                function(beta){
+                                                  quantile(beta,c(0.1, 0.5, 0.9))}
+                                          )})
+results_ci_2g <- data.frame(Reduce("rbind", results_2g))
+colnames(results_ci_2g) <- colnames(dia2e_x)
+
+df_compare <- matrix(NA, 10, 5)
+for(i in 0:4){
+  for(j in 1:10){
+    df_compare[j, i + 1] <- paste0(round(results_ci_2g[3*i+2,j],2),"(",
+                                   round(results_ci_2g[3*i+1,j],2), ", ",
+                                   round(results_ci_2g[3*i+3,j],2), ")")
+  }
+}
+```
+
