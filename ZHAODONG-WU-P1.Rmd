@@ -1,0 +1,834 @@
+---
+title: "Biostat276 Project 1"
+author: "Zhaodong Wu"
+date: "1/17/2022"
+output:
+  pdf_document:   
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list = ls())
+library(ggplot2)
+library(tidyverse)
+```
+
+
+# 1. Sampling from the Banana Distribution
+
+The two dimensional Banana distribution (Haario, 1999) is defined as:
+$$
+\pi (x_1, x_2) \propto \text{exp}(-\frac{x_1^2}{2}) \ \text{exp} \left[ -\frac{\{ x_2-2(x_1^2-5)\}^2}{2} \right]; \quad x_1, x_2 \in \mathbb{R}.
+$$
+
+$\textbf{(a)}$ Describe how to simulate directly from $\pi(x_1, x_2)$.
+
+$\textbf{Solution: }$
+
+From the information of joint probability-density function, we can know that the conditional probability of $x_2$ given $x_1$ is proportional to a normal kernel,
+$$
+\pi (x_2 |x_1) = \frac{\pi(x_1, x_2)}{\pi(x_1)} \propto  \text{exp} \left[ -\frac{\{ x_2-2(x_1^2-5)\}^2}{2} \right]
+$$
+
+Therefore we can have
+$$
+\pi (x_2 |x_1) = c * \text{exp} \left[ -\frac{\{ x_2-2(x_1^2-5)\}^2}{2} \right], \quad \text{where }c=\frac{1}{\sqrt{2\pi}}
+$$
+
+Then we can get the marginal distribution of $x_1$ is also proportional to a normal kernel:
+\begin{eqnarray}
+\pi(x_1) = \int_{-\infty}^{+\infty}\pi(x_1,x_2)dx_2 &\propto& \int_{-\infty}^{+\infty}
+\text{exp}(-\frac{x_1^2}{2}) \ \text{exp} \left[ -\frac{\{ x_2-2(x_1^2-5)\}^2}{2} \right] dx_2 \nonumber \\
+&=& \text{exp}(-\frac{x_1^2}{2})  \int_{-\infty}^{+\infty}\text{exp} \left[ -\frac{\{ x_2-2(x_1^2-5)\}^2}{2} \right] dx_2 \nonumber \\
+&=& \sqrt{2\pi} \cdot \text{exp}(-\frac{x_1^2}{2}) \nonumber \\
+&\propto&  \text{exp}(-\frac{x_1^2}{2}) \nonumber
+\end{eqnarray}
+
+Therefore we can get $x_1$ follows a standard normal distribution:
+$$
+\pi (x_1) = \frac{1}{\sqrt{2\pi}} \cdot  \text{exp}(-\frac{x_1^2}{2}) 
+$$
+
+We can use inverse-transformation method to do the simulation:
+
+We generate a R.V. $u \sim Uniform(0, 1)$ and take $x_1 = \Phi^{-1}(u)$;
+
+Then we generate another R.V. $v \sim Uniform(0, 1)$ and take $x_2 = \Phi^{-1}(v) + 2(x_1^2-5)$ since $x_2 -2(x_1^2-5)  | x_1 \sim N(0, 1)$. 
+
+The simulation of standard normal distribution I used is shown below:
+[Resource of standard normal simulation](https://stackoverflow.com/questions/43618421/generate-n0-1-using-uniform0-1-in-r)
+
+```{r}
+nsim_Q1 <- 15000
+#Box-Muller transform
+box_muller <- function(n = 1, mean = 0, sd = 1){
+  x <- vector("numeric", n)
+  i <- 1
+  while(i <= n){
+    u1 <- runif(1, 0, 1)
+    u2 <- runif(1, 0, 1)
+    x[i] <- sqrt(-2 * log(u1)) * cos(2 * pi * u2)
+    if ((i + 1) <= n){
+      x[i + 1] <- sqrt(-2 * log(u1)) * sin(2 * pi * u2)
+      i <- i + 1
+    }
+   
+   i <- i + 1
+  }
+  x * sd + mean
+}
+set.seed(1998)
+x1_Q1 <- box_muller(nsim_Q1)
+x2_Q1 <- box_muller(nsim_Q1) + 2 * (x1_Q1^2 - 5)
+
+plot(x1_Q1, x2_Q1, pch = 20, cex = 0.8, 
+     xlab = expression(x[1]), ylab = expression(x[2]),
+     main = "Simulation of Banana Distrbution using pdf directly")
+
+
+```
+
+The figure below is just a banana distribution plot of using fixed $x_1, x_2$, not related to questions.
+
+```{r}
+# generate x1, x2
+nsim_Q1 = 100
+x1 <- seq(-5, 5, length.out = nsim_Q1)
+x2 <- seq(-15, 5, length.out = nsim_Q1)
+mat <- matrix(0, nsim_Q1, nsim_Q1)
+
+# define banana distribution
+banana_Q1 <- function(x1, x2) {
+  fx1x2 <- exp(-(x1^2)/2)*exp(-((x2-2*(x1^2-5))^2)/2)
+  return(fx1x2)
+}
+
+# plug in values
+for (i in 1:nsim_Q1) {
+  for (j in 1:nsim_Q1) {
+    x = x1[i]
+    y = x2[j]
+    mat[i,j] = banana_Q1(x,y)
+  }
+}
+
+# plot contour image
+image(x1, x2, mat, col = hcl.colors(100, alpha = 0.5), xlim = c(-4, 4),
+     ylim = c(-15, 5),
+      xlab = expression(x[1]),
+      ylab = expression(x[2]))
+contour(x1, x2, mat, add = T, col = rgb(1, 0, 0, alpha = 0.5))
+```
+
+$\text{(b)}$ Describe how to simulate from $\pi(x_1,x_2)$ using the accept-reject method. Implement your algorithm and discuss sampling efficiency in relation to the chosen instrument distribution.
+
+$\textbf{Solution: }$ For the accept-reject method we need to evaluate the normalizing constant $M$ such that:
+$$
+\pi (x_1, x_2) \le M \cdot g(x_1, x_2), \quad \forall x_1, x_2 \in \mathbb{R}
+$$
+
+
+```{r}
+#define banana distribution again for simplicity of Q2
+banana_Q2 <- function(x) {
+  x1 = x[1]
+  x2 = x[2]
+  fx1x2 <- exp(-x1^2/2)*exp(-(x2-2*(x1^2-5))^2/2)
+}
+
+library(mvtnorm)
+acc_rej <- function(nsim, M, sd = 40, seed_Q2 = 1996) {
+  set.seed(seed_Q2)
+  # generate g(x)- a multivariate t distribution
+  x <- rmvt(n = nsim, sigma = diag(sd, 2), df = 6, delta = c(0, -10),
+            type = "shifted")
+  # generate u ~ U[0, 1]
+  u <- runif(nsim)
+  Accept <- vector()
+  fx <- vector()
+  g <- vector()
+  for (i in 1:nsim) {
+    gx = dmvt(x = x[i, ], sigma = diag(sd, 2), df = 6, delta = c(0, -10), 
+              log = FALSE, type = "shifted")
+    # check if the condition that f(x) <= M*g(x) is satisfied
+    if (banana_Q2(x[i, ]) > M*gx) {
+      print(i)
+      print(x[i, ])
+      print(banana_Q2(x[i, ]))
+      print(M*gx)
+      stop("The condition fails")
+    } 
+    # accept y = x if u <= f(x)/(M*g(x))
+    if (u[i] <= banana_Q2(x[i, ])/(M*gx)) {
+      Accept[i] <- TRUE
+      fx[i] <- banana_Q2(x[i, ])
+      g[i] <- gx
+    } else {
+      Accept[i] <- FALSE
+      fx[i] <- banana_Q2(x[i, ])
+      g[i] <- gx
+    }
+  }
+  return(list(x1 = x[, 1], x2 = x[, 2], Accept = Accept, fx = fx, g = g))
+}
+Q2 <- acc_rej(10000, 1000)
+# accuracy 
+sum(Q2$Accept)/length(Q2$Accept) # accuracy is low, about 0.005
+
+# plot
+plot(Q2$x1, Q2$x2, xlim = c(-4, 4), pch = 20, cex = 0.8, col = "grey",
+     ylim = c(-15, 5), xlab = expression(x[1]), ylab = expression(x[2]),
+     main = "Simulation of Banana Distrbution using Accept-Reject Method")
+points(Q2$x1[Q2$Accept == "TRUE"], Q2$x2[Q2$Accept == "TRUE"],
+       pch = 20, col = "green")
+contour(x1, x2, mat, add = T, col = rgb(1, 0, 0, alpha = 0.5))
+
+# decision plot
+plot(Q2$fx, 1000*Q2$g, cex = 0.1, xlab = "f(x)", ylab = "M * g(x)")
+abline(a = 0, b = 1, col = 2, lwd = 2)
+``` 
+
+According to the result, the accuracy is 0.005 if we use a multivariate $t$ distribution with a high stanard deviation.
+
+$\textbf{(c)}$ Describe how to simulate from $\pi(x_1,x_2)$ using sampling importance re-sampling. Implement your algorithm and discuss sampling efficiency in relation to the chosen importance distribution.
+
+For importance sampling, we can use x-values satisfying a multivariate $t$ distrbution in the previous problem and 
+calculate the weight using f(x) and g(x).
+
+```{r}
+plot(Q2$x1, Q2$x2, pch = 20, cex = 0.8, col = "grey", xlim = c(-4, 4), 
+     ylim = c(-15, 5), 
+     xlab = expression(x[1]), ylab = expression(x[2]),
+     main = "Simulation of Banana Distrbution using Importance-Sampling Method")
+w_Q1 <- Q2$fx/Q2$g
+w_Q1star = w_Q1/sum(w_Q1)
+samp_ind_Q3 = seq(1, 10000)
+x_ind = sample(samp_ind_Q3, prob = w_Q1star, replace = TRUE)
+x1_IS <- Q2$x1[x_ind]
+x2_IS <- Q2$x2[x_ind]
+points(x1_IS, x2_IS, pch = 20, cex = 0.8, col = "green")
+contour(x1, x2, mat, add = T, col = rgb(1, 0, 0, alpha = 0.5))
+```
+
+We can see the efficiency of importance sampling is nice.
+
+$\textbf{(d)}$ Construct a Markov Chain to sample from $\pi(x_1,x_2)$ using the Metropolis Hastings algorithm. Compare convergence and mixing for different proposal jump sizes.
+
+Random walk proposal: 
+
+$$
+x_1^{\ast} | x_1 \sim N(x_1, \sigma), \quad x_2^{\ast} | x_2 \sim N(x_2, \eta)
+$$
+
+```{r}
+mh.Q4 <- function(nsim = 10000, burn = 0.1, # chain parameters 
+                  sigma = 2, eta = 3, # MH proposal step size
+                  seed = 1998) {
+  set.seed(seed)
+  x1.ch <- vector()
+  x2.ch <- vector()
+  x1 <- 0
+  x2 <- -10
+  # run chain 
+  nsim1 <- nsim*(1 + burn)
+  burni <- nsim*burn
+  
+  # update x1, x2
+  for (isim in 1:nsim1) {
+    x1.t <- rnorm(1, x1, sigma)
+    x2.t <- rnorm(1, x2, eta)
+    P0 <- banana_Q1(x1, x2) %>% log
+    P1 <- banana_Q1(x1.t, x2.t) %>%  log
+    ratio <- P1 - P0
+    if (log(runif(1)) < ratio) {
+      x1 <- x1.t
+      x2 <- x2.t
+    }
+    # Store Chain after burn
+    if (isim > burni) {
+      i1 <- isim - burni
+      x1.ch[i1] <- x1
+      x2.ch[i1] <- x2
+      
+    }
+  }
+  return(list(x1 = x1.ch, x2 = x2.ch))
+}
+```
+
+```{r}
+# simulation begin
+
+# Condition 1: Small jump sizes
+nsim = 10000
+burn = 0.1
+sigma <- 0.05
+eta <- 0.08
+
+MC.simMH <- mh.Q4(nsim = nsim, burn = burn, sigma = sigma, eta = eta)
+
+par(mfrow=c(1,2))
+plot(1:nsim, MC.simMH$x1)
+plot(1:nsim, MC.simMH$x2)
+```
+
+```{r}
+# autocorrelation plot
+par(mfrow=c(1,2))
+acf(MC.simMH$x1)
+acf(MC.simMH$x2)
+```
+
+```{r}
+image(x1, x2, mat, col = hcl.colors(100, alpha = 0.5), xlim = c(-4, 4),
+     ylim = c(-15, 5),
+      xlab = expression(x[1]),
+      ylab = expression(x[2]))
+points(MC.simMH$x1, MC.simMH$x2, col = rgb(0,1,0,alpha = 0.3),cex = 0.6)
+```
+
+We can see simulation points (especially $x_2$) deviate much from our target distribution.
+
+```{r}
+# Condition 2: large jump sizes
+nsim = 10000
+burn = 0.1
+sigma2 <- 5
+eta2 <- 8
+
+MC.simMH2 <- mh.Q4(nsim = nsim, burn = burn, sigma = sigma2, eta = eta2)
+
+par(mfrow=c(1,2))
+plot(1:nsim, MC.simMH2$x1)
+plot(1:nsim, MC.simMH2$x2)
+```
+
+```{r}
+par(mfrow=c(1,2))
+acf(MC.simMH2$x1)
+acf(MC.simMH2$x2)
+```
+
+```{r}
+image(x1, x2, mat, col = hcl.colors(100, alpha = 0.5), xlim = c(-4, 4),
+     ylim = c(-15, 5),
+      xlab = expression(x[1]),
+      ylab = expression(x[2]))
+points(MC.simMH2$x1, MC.simMH2$x2, col = rgb(0,1,0,alpha = 0.3), pch = 19)
+```
+
+If we set a larger jump size, the convergence of $x_1$, $x_2$ becomes better and we can get more accurate values of $x_1, x_2$ which satisfy a banana distribution. For the mixing time, the auto-correlation becomes much smaller for x values if the jump size is small, and it's the result that we want.
+
+$\textbf{(e)}$ Construct a Markov Chain to sample from $\pi(x_1,x_2)$ updating iteratively $\pi(x_1|x_2)$ and $\pi(x_2|x_1)$ in a component- wise fashion, using the Metropolis Hastings algorithm. Compare convergence and mixing for different proposal jump sizes.
+
+```{r}
+mh.Q5 <- function(nsim = 10000, burn = 0.1, # chain parameters 
+                  sigma = 2, eta = 3, # MH proposal step size
+                  seed = 1998) {
+  set.seed(seed)
+  x1.ch <- vector()
+  x2.ch <- vector()
+  x1 <- 0
+  x2 <- -10
+  # run chain 
+  nsim1 <- nsim*(1 + burn)
+  burni <- nsim*burn
+  
+  # x2|x1
+  for (isim in 1:nsim1) {
+    x1.t <- rnorm(1, x1, sigma)
+    x2.t <- rnorm(1, x2, eta)
+    P0 <- banana_Q1(x1, x2) %>% log
+    P1 <- banana_Q1(x1, x2.t) %>%  log
+    ratio <- P1 - P0
+
+    if (log(runif(1)) < ratio) {
+      x2 <- x2.t
+      P0 <- P1
+    }
+    
+  # x1|x2
+    P1 <- banana_Q1(x1.t, x2) %>% log
+    ratio <- P1 - P0
+    
+    if (log(runif(1)) < ratio) {
+      x1 <- x1.t
+    }
+    # Store Chain after burn
+    if (isim > burni) {
+      i1 <- isim - burni
+      x1.ch[i1] <- x1
+      x2.ch[i1] <- x2
+      
+    }
+  }
+  return(list(x1 = x1.ch, x2 = x2.ch))
+}
+  
+```
+
+```{r}
+# Condition 1: small jump sizes
+
+MC.simMHC <- mh.Q5(nsim = nsim, burn = burn, sigma = sigma, eta = eta)
+
+par(mfrow=c(1,2))
+plot(1:nsim, MC.simMHC$x1)
+plot(1:nsim, MC.simMHC$x2)
+```
+
+```{r}
+par(mfrow=c(1,2))
+acf(MC.simMHC$x1)
+acf(MC.simMHC$x2)
+```
+
+```{r}
+image(x1, x2, mat, col = hcl.colors(100, alpha = 0.5), xlim = c(-4, 4),
+     ylim = c(-15, 5),
+      xlab = expression(x[1]),
+      ylab = expression(x[2]))
+points(MC.simMHC$x1, MC.simMHC$x2, col = rgb(0,1,0,alpha = 0.3), pch = 19)
+```
+
+```{r}
+# Condition 2: large jump sizes
+
+MC.simMHC2 <- mh.Q5(nsim = nsim, burn = burn, sigma = sigma2, eta = eta2)
+
+par(mfrow=c(1,2))
+plot(1:nsim, MC.simMHC2$x1)
+plot(1:nsim, MC.simMHC2$x2)
+```
+
+```{r}
+par(mfrow=c(1,2))
+acf(MC.simMHC2$x1)
+acf(MC.simMHC2$x2)
+```
+
+```{r}
+image(x1, x2, mat, col = hcl.colors(100, alpha = 0.5), xlim = c(-4, 4),
+     ylim = c(-15, 5),
+      xlab = expression(x[1]),
+      ylab = expression(x[2]))
+points(MC.simMHC2$x1, MC.simMHC2$x2, col = rgb(0,1,0,alpha = 0.3), pch = 19)
+```
+
+$\textbf{(f)}$ Repeat (iv) using component-wise Gibbs sampling.
+
+From $\textbf{(a)}$ wem know that 
+
+$$
+x_2 | x_1 \sim N(2(x_1^2-5), 1)
+$$
+
+```{r}
+gs.Q6 <- function(nsim = 10000, burn = 0.1, 
+                   sigma = 2, seed = 1998) {
+  set.seed(seed)
+  x1.ch <- vector()
+  x2.ch <- vector()
+  x1 <- 0
+  x2 <- -10
+  # run chain 
+  nsim1 <- nsim*(1 + burn)
+  burni <- nsim*burn
+  
+  # x2|x1
+  for (isim in 1:nsim1) {
+    x1.t <- rnorm(1, x1, sigma)
+    P0 <- banana_Q1(x1, x2) %>% log
+    P1 <- banana_Q1(x1.t, x2) %>%  log
+    ratio <- P1 - P0
+
+    if (log(runif(1)) < ratio) {
+      x1 <- x1.t
+    }
+    
+    x2 <- rnorm(1, 2*(x1^2-5), 1)
+    
+    # Store Chain after burn
+    if (isim > burni) {
+      i1 <- isim - burni
+      x1.ch[i1] <- x1
+      x2.ch[i1] <- x2
+      
+    }
+  }
+  return(list(x1 = x1.ch, x2 = x2.ch))
+}
+  
+```
+
+```{r}
+# Condition 1: small jump sizes
+
+MC.simGS <- gs.Q6(nsim = nsim, burn = burn, sigma = sigma)
+
+par(mfrow=c(1,2))
+plot(1:nsim, MC.simGS$x1)
+plot(1:nsim, MC.simGS$x2)
+```
+
+```{r}
+par(mfrow=c(1,2))
+acf(MC.simGS$x1)
+acf(MC.simGS$x2)
+```
+
+```{r}
+image(x1, x2, mat, col = hcl.colors(100, alpha = 0.5), xlim = c(-4, 4),
+     ylim = c(-15, 5),
+      xlab = expression(x[1]),
+      ylab = expression(x[2]))
+points(MC.simGS$x1, MC.simGS$x2, col = rgb(0,1,0,alpha = 0.3), pch = 19)
+```
+
+```{r}
+# Condition 2: large jump sizes
+
+MC.simGS2 <- gs.Q6(nsim = nsim, burn = burn, sigma = sigma2)
+
+par(mfrow=c(1,2))
+plot(1:nsim, MC.simGS2$x1)
+plot(1:nsim, MC.simGS2$x2)
+```
+
+```{r}
+par(mfrow=c(1,2))
+acf(MC.simGS2$x1)
+acf(MC.simGS2$x2)
+```
+
+```{r}
+image(x1, x2, mat, col = hcl.colors(100, alpha = 0.5), xlim = c(-4, 4),
+     ylim = c(-15, 5),
+      xlab = expression(x[1]),
+      ylab = expression(x[2]))
+points(MC.simGS2$x1, MC.simGS2$x2, col = rgb(0,1,0,alpha = 0.3), pch = 19)
+```
+
+$\textbf{(g)}$ Use the algorithms in (a, b, c, d, e, f) to estimate the following quantities: E(x^2_1),E(x_2) and Pr(x_1+x_2>0). Discuss and quantify how different sampling strategies affect Monte Carlo variance.
+
+```{r}
+summary_Q7 <- function(x1,x2){
+  df_x1 <- c(mean(x1), sd(x1), quantile(x1, c(0.025, 0.975))) %>% round(3)
+  df_x2 <- c(mean(x1^2), sd(x1^2), quantile(x1^2, c(0.025, 0.975))) %>% round(3)
+  df_x3 <- c(mean(x2), sd(x2), quantile(x2, c(0.025, 0.975))) %>% round(3)
+  df_x4 <- sum(x1 + x2 > 0)/length(x1)
+  out <- rbind(df_x1, df_x2, df_x3)
+  out2 <- df_x4  %>% round(3)
+  colnames(out)[c(1,2)] <- c("Expectation", "Standard Deviation")
+  return(list(out = out, out2 = out2))
+
+}
+```
+
+```{r}
+# Question a (use pdf directly)
+Q7_a <- summary_Q7(x1_Q1, x2_Q1)
+Q7_a$out
+Q7_a$out2
+```
+
+```{r}
+# Question b (AR)
+Q7_b <- summary_Q7(Q2$x1[Q2$Accept == "TRUE"], Q2$x2[Q2$Accept == "TRUE"])
+Q7_b$out
+Q7_b$out2
+```
+
+```{r}
+# Question c (Importance Sampling)
+Q7_c <- summary_Q7(x1_IS, x2_IS)
+Q7_c$out
+Q7_c$out2
+```
+
+```{r}
+# Question d (Random-walk Metropolis Hasting)
+Q7_d <- summary_Q7(MC.simMH2$x1, MC.simMH2$x2)
+Q7_d$out
+Q7_d$out2
+```
+
+```{r}
+# Question e (Component-wise Metropolis Hasting)
+Q7_e <- summary_Q7(MC.simMHC2$x1, MC.simMHC2$x2)
+Q7_e$out
+Q7_e$out2
+```
+
+```{r}
+# Question f (Gibbs Sampling)
+Q7_f <- summary_Q7(MC.simGS2$x1, MC.simGS2$x2)
+Q7_f$out
+Q7_f$out2
+```
+
+According to the result, Importance Sampling can help us reduce the Monte Carlo variances comparing to Accept-Reject method. In addition, component-wise Metropolis Hasting also reduces the variances compared to the Random-Walk one. Gibbs sampling is better than the Random-Walk Metropolis Hasting, but worse than component-wise Metropolis Hasting.
+In my case, component-wise Metropolis Hasting helps reduce reduce the Monte Carlo variances most.
+
+$\textbf{(h)}$ For the estimation of the quantities in $\textbf{(g)}$, discuss at least two strategies that could be implemented for some of the algorithms to reduce Monte Carlo variance. Implement these strategies and quantify your improved estimators in a Monte Carlo study.
+
+In class we discussed about methods of reducing Monte Carlo variances including Antithetic sampling, Control variates and Rao-Blackwellization except for Importance Sampling. 
+
+$\textbf{(1) Rao-Blackwell}$
+
+```{r}
+# Generate x_2 using Rao-Blackwell (Component-wise Metropolis Hasting)
+MC.simMHC2.rb <- 2*(MC.simMHC2$x1^2-5)
+summary_Q7(MC.simMHC2$x1, MC.simMHC2.rb)
+```
+
+The standard deviation of $x_2$ reduces to 1.663 compared to 1.893 getting from Component-wise Metropolis Hasting.
+
+$\textbf{(2) Antithetic Variate}$
+
+```{r}
+# compared to AR method
+
+library(mvtnorm)
+acc_rej_anti <- function(nsim, M, sd = 40, seed_Q2 = 1996) {
+  set.seed(seed_Q2)
+  # generate g(x)- a multivariate t distribution
+  x <- rmvt(n = nsim/2, sigma = diag(sd, 2), df = 6, delta = c(0, -10),
+            type = "shifted")
+  # generate antithetic variates
+  x_anti <- rbind(x, cbind(-x[, 1], x[, 2]))
+  # generate u ~ U[0, 1]
+  u <- runif(nsim)
+  Accept <- vector()
+  fx <- vector()
+  g <- vector()
+  for (i in 1:nsim) {
+    gx = dmvt(x = x_anti[i, ], sigma = diag(sd, 2), df = 6, delta = c(0, -10), 
+              log = FALSE, type = "shifted")
+    # check if the condition that f(x) <= M*g(x) is satisfied
+    if (banana_Q2(x_anti[i, ]) > M*gx) {
+      print(i)
+      print(x_anti[i, ])
+      print(banana_Q2(x_anti[i, ]))
+      print(M*gx)
+      stop("The condition fails")
+    } 
+    # accept y = x if u <= f(x)/(M*g(x))
+    if (u[i] <= banana_Q2(x_anti[i, ])/(M*gx)) {
+      Accept[i] <- TRUE
+      fx[i] <- banana_Q2(x_anti[i, ])
+      g[i] <- gx
+    } else {
+      Accept[i] <- FALSE
+      fx[i] <- banana_Q2(x_anti[i, ])
+      g[i] <- gx
+    }
+  }
+  return(list(x1 = x_anti[, 1], x2 = x_anti[, 2], 
+              Accept = Accept, fx = fx, g = g))
+}
+Q8 <- acc_rej_anti(10000, 1000)
+# accuracy 
+sum(Q8$Accept)/length(Q8$Accept) # accuracy is low, about 0.005
+
+# plot
+plot(Q8$x1, Q8$x2, xlim = c(-4, 4), pch = 20, cex = 0.8, col = "grey",
+     ylim = c(-15, 5), xlab = expression(x[1]), ylab = expression(x[2]),
+     main = "Simulation of Banana Distrbution using Accept-Reject Method")
+points(Q8$x1[Q8$Accept == "TRUE"], Q8$x2[Q8$Accept == "TRUE"],
+       pch = 20, col = "green")
+contour(x1, x2, mat, add = T, col = rgb(1, 0, 0, alpha = 0.5))
+```
+```{r}
+summary_Q7(Q8$x1[Q8$Accept == "TRUE"], Q8$x2[Q8$Accept == "TRUE"])
+```
+
+Compared to the standard deviation of estimators we got from AR method, the standard deviations we got from Antithetic Variate is kind of smaller.
+
+# 2. Bayesian Adaptive Lasso
+
+Please describe all your work in clear terms, before implementing `R` code. Each question should include a description of your approach with clear indication of where I can find the associated source code. Your code should be attached to your assignment or uploaded online to a repository I can freely access.
+
+Consider the implementation of a posterior simulation algorithm for Bayesian adaptive LASSO. More precisely consider the following model:
+
+$$
+\boldsymbol{Y} | \boldsymbol{\beta}, \sigma^2 \sim N(\boldsymbol{X \beta}, \sigma^2 I_n),
+$$
+
+with $Y \in \mathbb{R}^n, X \in \mathbb{R}^{n \times p}$, and $\beta \in \mathbb{R}^p$. The model is completed with priors:
+
+$$
+\boldsymbol{\beta} | \tau_{1}^2, \cdots, \tau_{p}^2 \sim N_p(\ \{0, \text{diag}(\tau_{1}^2, \cdots, \tau_{p}^2)\},
+$$
+
+$$
+p(\tau_{j}^2 | \lambda^2) \propto \exp{-\frac{\lambda^2}{2}\tau_{j}^2}; \quad j = 1,\cdots, p
+$$
+
+$$
+h := 1/\sigma^2 \sim Gamma(0.1, rate = 10)
+$$
+
+
+$\textbf{(a)}$. Consider $p = 1$. Simulate $5,000$ Monte Carlo samples from the conditional prior $\boldsymbol{\beta} | \tau^2 = 1$ and obtain a plot of the density using the `R` function density.
+
+If $p=1$, then $\beta | \tau = 1 \sim N(0,1)$, we can use Accept-Reject method to generate $\beta$:
+
+```{r}
+set.seed(1998)
+nsim_2a <- 5000000
+u_2a <- runif(nsim_2a)
+gx_2a <- 1/50
+M_2a <- 50
+x_2a <- 50*runif(nsim_2a) - 25
+fx_2a <- dnorm(x_2a)
+beta_2 <- x_2a[u_2a <= fx_2a/(M_2a*gx_2a)]
+beta_2a <- beta_2[1:5000]
+density(beta_2a) %>% plot(., main = expression(paste("Distribution of ", 
+                                                     beta,"|", tau, " = 1")),
+                          lwd = 5)
+```
+
+$\textbf{(b)}$. Consider $p = 1$. Simulate $5,000$ Monte Carlo samples from the marginal prior $\boldsymbol{\beta}$, considering $\lambda^2 = 2$, so that $E(\tau^2 | \lambda^2) = 1$. Obtain a plot of the density as in $\textbf{(a)}$.
+
+We know $p = 1$ and $\lambda^2 = 2$ so that $P(\tau^2 | \lambda^2) = \text{exp}(-\tau^2), E(\tau^2 | \lambda^2) = 1$. We can use inverse transformation method to generate $\tau$ and then use Accept-Reject method like $\textbf{(a)}$ to generate $\beta$:
+
+$$
+0 \le \text{exp}(-\tau^2) \le 1 \Rightarrow \text{generate } \tau = \sqrt{-\text{log}U},\text{ where } U \sim Uniform[0, 1]
+$$
+```{r}
+set.seed(1998)
+nsim_2b <- 5000000
+tau_2b <- sqrt(-log(runif(nsim_2b)))
+u_2b <- runif(nsim_2b)
+gx_2b <- 1/50
+M_2b <- 50
+x_2b <- 50*runif(nsim_2b) - 25
+fx_2b <- dnorm(x_2b, mean = 0, sd = tau_2b)
+beta_22 <- x_2b[u_2b <= fx_2b/(M_2b*gx_2b)]
+beta_2b <- beta_22[1:5000]
+density(beta_2b) %>% plot(., main = expression(paste("Distribution of ", 
+                                                     beta, "|", tau^2,)),
+                          lwd = 5)
+```
+
+$\textbf{(c)}$. Consider $p = 1$. Add a hyper prior on $\gamma = \frac{1}{\lambda^2} ∼ Gamma(a,rate = b)$. Assess how the marginal prior of $\beta$ changes for $a = 1$ and values of $b \ge 1$.
+
+We know that $p=1$ and $a = 1$, $\gamma \sim Exponential (b)$
+
+```{r}
+par(mfrow=c(2,2))
+set.seed(1998)
+for (b in c(0.1, 1, 10, 100)) {
+  nsim_2c <- 5000000
+  gamma <- -b*log(runif(nsim_2c)) 
+  lambda_sq <- 1/gamma
+  tau_2c <- sqrt(-2*log(runif(nsim_2c))/lambda_sq)
+  u_2c <- runif(nsim_2c)
+  gx_2c <- 1/50
+  M_2c <- 50
+  x_2c <- 50*runif(nsim_2c) - 25
+  fx_2c <- dnorm(x_2c, mean = 0, sd = tau_2c)
+  beta_23 <- x_2c[u_2c <= fx_2c/(M_2c*gx_2c)]
+  beta_2c <- beta_23[1:5000]
+  density(beta_2c) %>% plot(., main = expression(paste("Distribution of ", 
+                                                     beta, "|", tau^2)),
+                          lwd = 2)
+}
+
+```
+
+$\textbf{(d)}$. Considering the hyper prior in $\textbf{(c)}$, describe a Markov Chain Monte Carlo algorithm to sample from the posterior distribution of $\beta$ and $\sigma^2$.
+
+From $\textbf{(c)}$ we know that $\lambda^2 \sim InverseGamma(a, b)$, $\sigma^2 \sim InverseGamma(0.1, 10)$ and $p(\tau_{j}^2 | \lambda^2) \propto \exp{-\frac{\lambda^2}{2}\tau_{j}^2}; \quad j = 1,\cdots, p$, we can get the joint distribution of $\lambda^2, \tau^2$:
+
+$$
+p(\lambda^2, \{ \tau_1^2, \cdots, \tau_p^2 \}) = [\prod_{i=1}^n p(\tau_{j}^2 | \lambda^2)]p(\lambda^2)
+$$
+
+Then we can get the posterior distrbution of $\sigma^2$:
+
+\begin{eqnarray}
+p(\sigma^2 | \boldsymbol{Y}, \boldsymbol{\beta}, \{ \tau_1^2, \cdots, \tau_p^2 \}, \lambda^2) &=& p(\sigma^2 | \boldsymbol{Y}, \boldsymbol{\beta}) \nonumber \\
+&\propto& p(\boldsymbol{Y}| \sigma^2, \boldsymbol{\beta})p(\sigma^2) \nonumber \\
+&=& \text{exp}[{-\frac{(\boldsymbol{Y}-\boldsymbol{X \beta})^T (\boldsymbol{Y}-\boldsymbol{X \beta})}{2 \sigma^2}}] \cdot (\frac{1}{\sigma^2})^{\frac{n}{2}} \cdot \text{exp}[{-\frac{10}{\sigma^2}}] \cdot (\frac{1}{\sigma^2})^{a+1} \nonumber \\
+&\sim& Inversegamma(0.1+\frac{n}{2}, \frac{(\boldsymbol{Y}-\boldsymbol{X \beta})^T (\boldsymbol{Y}-\boldsymbol{X \beta})}{2}+10) \nonumber
+\end{eqnarray}
+
+and also the posterior distribution of $\boldsymbol{\beta}$:
+
+\begin{eqnarray}
+p(\boldsymbol{\beta} | \boldsymbol{Y}, \sigma^2, \{ \tau_1^2, \cdots, \tau_p^2 \}, \lambda^2) &=& p(\boldsymbol{\beta} | \boldsymbol{Y}, \sigma^2, \{ \tau_1^2, \cdots, \tau_p^2 \}) \nonumber \\
+&\propto& p(\boldsymbol{Y}| \sigma^2, \boldsymbol{\beta})p(\boldsymbol{\beta} | \tau_{1}^2, \cdots, \tau_{p}^2) \nonumber \\
+&\propto& \text{exp}\{-\frac{1}{2}[\beta^T(\frac{X^T X}{\sigma^2} + \text{diag}(1/\tau_{1}^2, \cdots, 1/\tau_{p}^2))\beta -\frac{2\beta^T X^T Y}{\sigma^2} + \frac{Y^T Y}{\sigma^2}]\} \nonumber \\
+&\sim& N([\frac{X^T X}{\sigma^2} + \text{diag}(1/\tau_{1}^2, \cdots, 1/\tau_{p}^2)]^{-1}、\frac{X^T Y}{\sigma^2}, [\frac{X^T X}{\sigma^2} + \text{diag}(1/\tau_{1}^2, \cdots, 1/\tau_{p}^2)]^{-1}) \nonumber
+\end{eqnarray}
+
+For the full conditional distribution of $\tau_i^2$:
+
+\begin{eqnarray}
+p(\tau_i^2 | Y, \beta, \sigma^2, \lambda^2) &\propto& (\tau_i^2)^{-\frac{1}{2}} \text{exp}(-\frac{1}{2} \beta^T D_{\tau}^{-1} \beta) \text{exp}(-\frac{\lambda^2 \tau_i^2}{2}) \nonumber \\
+&\propto& (\tau_i^2)^{-\frac{1}{2}} \text{exp}(-\frac{\beta_i^2}{2\tau_i^2} )\text{exp}(-\frac{\lambda^2 \tau_i^2}{2}) \nonumber 
+\end{eqnarray}
+
+Thus $p(\tau_i^2 | Y, \beta, \sigma^2, \lambda^2)$ is independent of $\tau_j^2$, i.e. $\tau_i^2$ and $\tau_j^2$ are conditionally independent. Then if we explore the distribution of $1/\tau_i^2$:
+
+\begin{eqnarray}
+p(x | Y, \beta, \sigma^2, \lambda^2) &\propto& x^{\frac{1}{2}} \text{exp}[-\frac{\lambda^2}{2}(\frac{\beta_i^2}{\lambda^2}x+\frac{1}{x})] \frac{1}{x^2} \nonumber \\
+&\propto& x^{-3/2}\text{exp}[-\frac{\lambda^2}{2}(\frac{\beta_i^2}{\lambda^2}x+\frac{1}{x})] \nonumber \\
+&\sim& InverseGaussian(\frac{\lambda}{\beta_i}, \lambda^2) \nonumber
+\end{eqnarray}
+
+which denotes a inverse gaussian distribution with mean $\frac{\lambda}{\beta_i}$ and shape parameter $\lambda^2$.
+
+For the full conditional distribution of $\lambda^2$:
+
+\begin{eqnarray}
+p(\lambda^2 | Y, \beta, \sigma^2, \{ \tau_1^2, \cdots, \tau_p^2 \}) &\propto& (\lambda^2)^{a-1} \text{exp}(-b\lambda^2-\frac{1}{2}\sum_{j=1}^p \tau_j^2) \nonumber \\
+&\sim& Gamma(a, b+\frac{1}{2}\sum_{j=1}^p \tau_j^2) \nonumber 
+\end{eqnarray}
+
+Now, we have full conditional distribution for all the parameters and hence can run Metropolis Hasting with Gibbs sampler using the above full conditionals and thus generate samples from the joint posterior.
+
+$\textbf{(e)}$. Implement such algorithm in `R` and compare your results with estimates obtained using `glmnet()`. In particular, you should test your results on the `diabetes` data available from `lars`, (use the matrix of predictors x).
+
+```{r}
+# load packages
+library(lars)
+library(MCMCpack)
+library(statmod)
+
+# load data
+data("diabetes")
+dia2e_x <- diabetes$x # matrix with 10 columns
+dia2e_y <- diabetes$y # a numerical vector
+
+# set initial values
+init_2e <- list(tau_sq = rep(10,10),
+                beta = rep(0,10),
+                sigma_sq = 0.02,
+                lambda_sq = 1)
+```
+
+```{r}
+# use glmnet to get estimators
+library(MASS)
+library(glmnet)
+
+lasso_2e <- glmnet(dia2e_x, dia2e_y)
+cvfit_2e <- cv.glmnet(dia2e_x, dia2e_y)
+coef(cvfit_2e, s = "lambda.min")
+
+cvfit_2e$lambda.min
+plot(lasso_2e,label = TRUE)
+```
+
+$\textbf{(f)}$. For the diabetes data, fix $\lambda$ and produce a regularization path for adaptive Bayesian Lasso obtained on a grid of values for the tuning parameter $\lambda$. Describe your approach and compare your result with the path obtained using `glmnet()`.
+
+$\textbf{(g)}$. Free $\lambda$ and carry out a sensitivity analysis assessing the behavior of the posterior distribution of $\beta$ and $\sigma^2$, as hyper parameters $a$ and $b$ are changed. Explain clearly the rationale you use to assess sensitivity and provide recom- mendations for the analysis of the `diabetes` data.
