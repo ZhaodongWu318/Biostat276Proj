@@ -681,6 +681,7 @@ Compared to the standard deviation of estimators we got from AR method, the stan
 
 Please describe all your work in clear terms, before implementing `R` code. Each question should include a description of your approach with clear indication of where I can find the associated source code. Your code should be attached to your assignment or uploaded online to a repository I can freely access.
 
+
 Consider the implementation of a posterior simulation algorithm for Bayesian adaptive LASSO. More precisely consider the following model:
 
 $$
