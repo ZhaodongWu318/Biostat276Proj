@@ -17,6 +17,7 @@ knitr::opts_chunk$set(echo = TRUE)
 rm(list = ls())
 library(ggplot2)
 library(tidyverse)
+library(kableExtra)
 ```
 
 
@@ -194,7 +195,7 @@ plot(Q2$fx, 1000*Q2$g, cex = 0.1, xlab = "f(x)", ylab = "M * g(x)")
 abline(a = 0, b = 1, col = 2, lwd = 2)
 ``` 
 
-According to the result, the accuracy is 0.005 if we use a multivariate $t$ distribution with a high stanard deviation.
+According to the result, the accuracy is 0.005 if we use a multivariate $t$ distribution with a high standard deviation.
 
 $\textbf{(c)}$ Describe how to simulate from $\pi(x_1,x_2)$ using sampling importance re-sampling. Implement your algorithm and discuss sampling efficiency in relation to the chosen importance distribution.
 
@@ -287,13 +288,14 @@ acf(MC.simMH$x2)
 
 ```{r}
 image(x1, x2, mat, col = hcl.colors(100, alpha = 0.5), xlim = c(-4, 4),
-     ylim = c(-15, 5),
+      ylim = c(-15, 5),
       xlab = expression(x[1]),
-      ylab = expression(x[2]))
+      ylab = expression(x[2]),
+      main = "Random-Walk Metropolis Hasting using small jump size")
 points(MC.simMH$x1, MC.simMH$x2, col = rgb(0,1,0,alpha = 0.3),cex = 0.6)
 ```
 
-We can see simulation points (especially $x_2$) deviate much from our target distribution.
+We can see simulation points cant fill the two tails of banana distrbution
 
 ```{r}
 # Condition 2: large jump sizes
@@ -317,9 +319,10 @@ acf(MC.simMH2$x2)
 
 ```{r}
 image(x1, x2, mat, col = hcl.colors(100, alpha = 0.5), xlim = c(-4, 4),
-     ylim = c(-15, 5),
+      ylim = c(-15, 5),
       xlab = expression(x[1]),
-      ylab = expression(x[2]))
+      ylab = expression(x[2]),
+      main = "Random-Walk Metropolis Hasting using large jump size")
 points(MC.simMH2$x1, MC.simMH2$x2, col = rgb(0,1,0,alpha = 0.3), pch = 19)
 ```
 
@@ -392,8 +395,9 @@ acf(MC.simMHC$x2)
 ```{r}
 image(x1, x2, mat, col = hcl.colors(100, alpha = 0.5), xlim = c(-4, 4),
      ylim = c(-15, 5),
-      xlab = expression(x[1]),
-      ylab = expression(x[2]))
+     xlab = expression(x[1]),
+     ylab = expression(x[2]),
+     main = "Component-wise Metropolis Hasting using small jump size")
 points(MC.simMHC$x1, MC.simMHC$x2, col = rgb(0,1,0,alpha = 0.3), pch = 19)
 ```
 
@@ -415,15 +419,16 @@ acf(MC.simMHC2$x2)
 
 ```{r}
 image(x1, x2, mat, col = hcl.colors(100, alpha = 0.5), xlim = c(-4, 4),
-     ylim = c(-15, 5),
+      ylim = c(-15, 5),
       xlab = expression(x[1]),
-      ylab = expression(x[2]))
+      ylab = expression(x[2]),
+      main = "Component-wise Metropolis Hasting using large jump size")
 points(MC.simMHC2$x1, MC.simMHC2$x2, col = rgb(0,1,0,alpha = 0.3), pch = 19)
 ```
 
 $\textbf{(f)}$ Repeat (iv) using component-wise Gibbs sampling.
 
-From $\textbf{(a)}$ wem know that 
+From $\textbf{(a)}$ we know that 
 
 $$
 x_2 | x_1 \sim N(2(x_1^2-5), 1)
@@ -486,8 +491,9 @@ acf(MC.simGS$x2)
 ```{r}
 image(x1, x2, mat, col = hcl.colors(100, alpha = 0.5), xlim = c(-4, 4),
      ylim = c(-15, 5),
-      xlab = expression(x[1]),
-      ylab = expression(x[2]))
+     xlab = expression(x[1]),
+     ylab = expression(x[2]),
+     main = "Gibbs Sampler using small jump size")
 points(MC.simGS$x1, MC.simGS$x2, col = rgb(0,1,0,alpha = 0.3), pch = 19)
 ```
 
@@ -509,9 +515,10 @@ acf(MC.simGS2$x2)
 
 ```{r}
 image(x1, x2, mat, col = hcl.colors(100, alpha = 0.5), xlim = c(-4, 4),
-     ylim = c(-15, 5),
+      ylim = c(-15, 5),
       xlab = expression(x[1]),
-      ylab = expression(x[2]))
+      ylab = expression(x[2]),
+      main = "Gibbs Sampler using large jump size")
 points(MC.simGS2$x1, MC.simGS2$x2, col = rgb(0,1,0,alpha = 0.3), pch = 19)
 ```
 
@@ -534,43 +541,55 @@ summary_Q7 <- function(x1,x2){
 ```{r}
 # Question a (use pdf directly)
 Q7_a <- summary_Q7(x1_Q1, x2_Q1)
-Q7_a$out
+Q7_a$out %>%
+  kbl(caption = "Summary of using pdf directly") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
 Q7_a$out2
 ```
 
 ```{r}
 # Question b (AR)
 Q7_b <- summary_Q7(Q2$x1[Q2$Accept == "TRUE"], Q2$x2[Q2$Accept == "TRUE"])
-Q7_b$out
+Q7_b$out %>%
+  kbl(caption = "Summary of using accept-reject method") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
 Q7_b$out2
 ```
 
 ```{r}
 # Question c (Importance Sampling)
 Q7_c <- summary_Q7(x1_IS, x2_IS)
-Q7_c$out
+Q7_c$out %>%
+  kbl(caption = "Summary of using importance sampling") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
 Q7_c$out2
 ```
 
 ```{r}
 # Question d (Random-walk Metropolis Hasting)
 Q7_d <- summary_Q7(MC.simMH2$x1, MC.simMH2$x2)
-Q7_d$out
+Q7_d$out %>%
+  kbl(caption = "Summary of using Random-walk Metropolis Hasting") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
 Q7_d$out2
 ```
 
 ```{r}
 # Question e (Component-wise Metropolis Hasting)
 Q7_e <- summary_Q7(MC.simMHC2$x1, MC.simMHC2$x2)
-Q7_e$out
+Q7_e$out %>%
+  kbl(caption = "Summary of using Component-wise Metropolis Hasting") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
 Q7_e$out2
 ```
 
 ```{r}
 # Question f (Gibbs Sampling)
 Q7_f <- summary_Q7(MC.simGS2$x1, MC.simGS2$x2)
-Q7_f$out
-Q7_f$out2
+Q7_f$out %>%
+  kbl(caption = "Summary of using Gibbs Sampling") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+Q7_f$out2 
 ```
 
 According to the result, Importance Sampling can help us reduce the Monte Carlo variances comparing to Accept-Reject method. In addition, component-wise Metropolis Hasting also reduces the variances compared to the Random-Walk one. Gibbs sampling is better than the Random-Walk Metropolis Hasting, but worse than component-wise Metropolis Hasting.
@@ -585,7 +604,10 @@ $\textbf{(1) Rao-Blackwell}$
 ```{r}
 # Generate x_2 using Rao-Blackwell (Component-wise Metropolis Hasting)
 MC.simMHC2.rb <- 2*(MC.simMHC2$x1^2-5)
-summary_Q7(MC.simMHC2$x1, MC.simMHC2.rb)
+summary_Q7(MC.simMHC2$x1, MC.simMHC2.rb)$out %>%
+  kbl(caption = "Summary of using Rao-Blackwell") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+summary_Q7(MC.simMHC2$x1, MC.simMHC2.rb)$out2
 ```
 
 The standard deviation of $x_2$ reduces to 1.663 compared to 1.893 getting from Component-wise Metropolis Hasting.
@@ -646,7 +668,11 @@ points(Q8$x1[Q8$Accept == "TRUE"], Q8$x2[Q8$Accept == "TRUE"],
 contour(x1, x2, mat, add = T, col = rgb(1, 0, 0, alpha = 0.5))
 ```
 ```{r}
-summary_Q7(Q8$x1[Q8$Accept == "TRUE"], Q8$x2[Q8$Accept == "TRUE"])
+summary_Q7(Q8$x1[Q8$Accept == "TRUE"], Q8$x2[Q8$Accept == "TRUE"])$out %>%
+  kbl(caption = "Summary of using antithetic variate") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+summary_Q7(Q8$x1[Q8$Accept == "TRUE"], Q8$x2[Q8$Accept == "TRUE"])$out2 
 ```
 
 Compared to the standard deviation of estimators we got from AR method, the standard deviations we got from Antithetic Variate is kind of smaller.
@@ -718,7 +744,7 @@ density(beta_2b) %>% plot(., main = expression(paste("Distribution of ",
                           lwd = 5)
 ```
 
-$\textbf{(c)}$. Consider $p = 1$. Add a hyper prior on $\gamma = \frac{1}{\lambda^2} ∼ Gamma(a,rate = b)$. Assess how the marginal prior of $\beta$ changes for $a = 1$ and values of $b \ge 1$.
+$\textbf{(c)}$. Consider $p = 1$. Add a hyper prior on $\gamma = \lambda^2 ∼ Gamma(a,rate = b)$. Assess how the marginal prior of $\beta$ changes for $a = 1$ and values of $b \ge 1$.
 
 We know that $p=1$ and $a = 1$, $\gamma \sim Exponential (b)$
 
@@ -727,8 +753,8 @@ par(mfrow=c(2,2))
 set.seed(1998)
 for (b in c(0.1, 1, 10, 100)) {
   nsim_2c <- 5000000
-  gamma <- -b*log(runif(nsim_2c)) 
-  lambda_sq <- 1/gamma
+  gamma <- -1/b*log(runif(nsim_2c)) 
+  lambda_sq <- gamma
   tau_2c <- sqrt(-2*log(runif(nsim_2c))/lambda_sq)
   u_2c <- runif(nsim_2c)
   gx_2c <- 1/50
@@ -790,11 +816,21 @@ which denotes a inverse gaussian distribution with mean $\frac{\lambda}{\beta_i}
 For the full conditional distribution of $\lambda^2$:
 
 \begin{eqnarray}
-p(\lambda^2 | Y, \beta, \sigma^2, \{ \tau_1^2, \cdots, \tau_p^2 \}) &\propto& (\lambda^2)^{a-1} \text{exp}(-b\lambda^2-\frac{1}{2}\sum_{j=1}^p \tau_j^2) \nonumber \\
-&\sim& Gamma(a, b+\frac{1}{2}\sum_{j=1}^p \tau_j^2) \nonumber 
+p(\lambda^2 | Y, \beta, \sigma^2, \{ \tau_1^2, \cdots, \tau_p^2 \}) &\propto& (\lambda^2)^{a+p-1} \text{exp}(-b\lambda^2-\frac{1}{2}\sum_{j=1}^p \tau_j^2) \nonumber \\
+&\sim& Gamma(a+p, b+\frac{1}{2}\sum_{j=1}^p \tau_j^2) \nonumber 
 \end{eqnarray}
 
 Now, we have full conditional distribution for all the parameters and hence can run Metropolis Hasting with Gibbs sampler using the above full conditionals and thus generate samples from the joint posterior.
+
+\textbf{Steps: }
+
+(1) Sample $\lambda^2$ from the posterior distribution $p(\lambda^2 | Y, \sigma^2, \beta, \{ \tau_1^2, \cdots, \tau_p^2 \}) \propto Gamma(a+p, b+\frac{1}{2}\sum_{j=1}^p \tau_j^2)$ given values of $\tau^2$.
+
+(2) Sample $\tau^2$ from the posterior distribution $p(1/\tau_j^2 | Y, \beta_j, \sigma^2, \lambda^2) \propto InverseGaussain(\lambda/\beta_i, \lambda^2)$ given values of $\lambda$ and $\beta_i$.
+
+(3) Sample $\sigma^2$ from the posterior distribution $p(\sigma^2 | \boldsymbol{Y}, \boldsymbol{\beta}, \{ \tau_1^2, \cdots, \tau_p^2 \}, \lambda^2) \propto Inversegamma(0.1+\frac{n}{2}, \frac{(\boldsymbol{Y}-\boldsymbol{X \beta})^T (\boldsymbol{Y}-\boldsymbol{X \beta})}{2}+10)$ given values of $\beta$.
+
+(4) Sample $\beta$ from the posterior distribution $p(\boldsymbol{\beta} | \boldsymbol{Y}, \sigma^2, \{ \tau_1^2, \cdots, \tau_p^2 \}, \lambda^2) \propto N([\frac{X^T X}{\sigma^2} + \text{diag}(1/\tau_{1}^2, \cdots, 1/\tau_{p}^2)]^{-1}、\frac{X^T Y}{\sigma^2}, [\frac{X^T X}{\sigma^2} + \text{diag}(1/\tau_{1}^2, \cdots, 1/\tau_{p}^2)]^{-1})$ given values of $\tau^2$ and $\sigma^2$.
 
 $\textbf{(e)}$. Implement such algorithm in `R` and compare your results with estimates obtained using `glmnet()`. In particular, you should test your results on the `diabetes` data available from `lars`, (use the matrix of predictors x).
 
@@ -811,7 +847,7 @@ dia2e_x <- diabetes$x # matrix with 10 columns
 dia2e_y <- diabetes$y # a numerical vector
 beta_hat <- solve(t(dia2e_x) %*% dia2e_x) %*% t(dia2e_x) %*% dia2e_y
 
-init_2e<- list(tau_sq = rep(10, 10),
+init_2e<- list(tau_sq = rep(5, 10),
                beta = beta_hat,
                sigma_sq = 0.02,
                lambda_sq = 1)
@@ -821,7 +857,8 @@ gibbs_2e <- function(init_2e,                     # initial values
                      a = 1, b = 2,                # prior
                      X = dia2e_x, Y = dia2e_y,    # dataset
                      seed = 1998,
-                     reg_path = FALSE, sen_analysis = FALSE){
+                     reg_path = FALSE,            # 2f
+                     sen_analysis = FALSE){       # 2g
   set.seed(seed)
   # initialization---------------------------------------------
   tau_sq <- init_2e$tau_sq
@@ -839,6 +876,7 @@ gibbs_2e <- function(init_2e,                     # initial values
   burni <- nsim * burn
   
   for (isim in 1:nsim1) {
+    
     # beta ~ multivariate normal
     betamean <- solve(t(X) %*% X + diag(sigma_sq/tau_sq)) %*% t(X) %*% Y
     betavar <- solve((t(X) %*% X)/sigma_sq + diag(1/tau_sq))
@@ -846,12 +884,14 @@ gibbs_2e <- function(init_2e,                     # initial values
     
     # sigma_sq ~ inverse gamma
     sigma_sq <- 1/(rgamma(1, shape = 0.1 + 442/2, 
-                       rate = 0.5 * t(Y - X %*% t(beta)) %*% (Y - X %*% t(beta)) + 10))
-    #lambda_sq
-    if(reg_path == TRUE){
+                       rate = 0.5 * t(Y - X %*% t(beta)) %*% 
+                         (Y - X %*% t(beta)) + 10))
+    
+    #lambda_sq ~ gamma
+    if(reg_path == TRUE){               # for 2f (fix lambda)
       lambda_sq <- lambda_sq
-    }else if(sen_analysis == TRUE){
-      lambda_sq <- 1/rgamma(1, a, rate = b)
+    }else if(sen_analysis == TRUE){     # for 2g (free lambda but a, b change)
+      lambda_sq <- rgamma(1, shape = a + 10, rate = b + sum(tau_sq)/2)
     }else{
       lambda_sq <- rgamma(1, shape = a + 10, rate = b + sum(tau_sq)/2)
     }
@@ -863,6 +903,7 @@ gibbs_2e <- function(init_2e,                     # initial values
       return(1/out)
     }
     )
+    
     
      if(isim > burni){
        i1 <- isim - burni
@@ -889,72 +930,112 @@ coeff_2e <- coef(lasso_2e, s = min(lasso_2e$lambda))
 
 # comparison
 coeff_gibbs <- apply(results_gibbs_2e$beta, 2, 
-                     function(x){quantile(x,c(0.1,0.5,0.9))})
-coeff_med <- coeff_gibbs[2, ]
+                     function(x){quantile(x,c(0.25, 0.5, 0.75))})
 
-comparison <- tibble("MCMC-Gibbs" = coeff_med, 
+coeff_25th <- coeff_gibbs[1, ]
+coeff_med <- coeff_gibbs[2, ]
+coeff_75th <- coeff_gibbs[3, ]
+
+comparison <- tibble("MCMC-Gibbs(25th Percentile)" = coeff_25th,
+                     "MCMC-Gibbs(Median)" = coeff_med,
+                     "MCMC-Gibbs(75th Percentile)" = coeff_75th,
                      "Glmnet" = coeff_2e[-1])
 
-comparison
+comparison %>%
+  kbl(caption = NULL) %>%
+  kable_classic(full_width = F, html_font = "Cambria")
 ```
 
+According to the result of the table, we can see some of the estimators are close but others are quite different, even not on the same magnitude. I think Bayesian Lasso is more general than the classic Lasso and it can give us more reasonable result of estimators. The classic one also has the problem of shrinkage of coefficient estimates towards zero.  
+
 $\textbf{(f)}$. For the diabetes data, fix $\lambda$ and produce a regularization path for adaptive Bayesian Lasso obtained on a grid of values for the tuning parameter $\lambda$. Describe your approach and compare your result with the path obtained using `glmnet()`.
+
+For this question we can add an option in our function of $\textbf{(e)}$, we generate some $\lambda$ and set them as initial values in Gibbs sampler, without changing in the whole process of each turn of simulation.
 
 ```{r}
 # fix values of lambda
 library(reshape2)
 library(plotmo)
-lambda_2f <- data.frame(lambda_sq =exp(seq(-5, 5, 0.1)))
+lambda_2f <- data.frame(lambda_sq = exp(seq(-15, 5, 0.1))^2) # lambda_sq
 
 # regression_path
 test_2f <- apply(lambda_2f, 1, 
                  function(x){
                    init_2e$lambda_sq <- x
-                   return(gibbs_2e(init_2e,nsim = 1000, 
+                   return(gibbs_2e(init_2e, nsim = 1000, 
                                    burn = 0.5, b = 2, reg_path = TRUE))})
 
-results_2f <- lapply(test_2f, function(x){apply(x$beta,2,median)})
+results_2f <- lapply(test_2f, function(x){apply(x$beta, 2, median)})
 results_plot_2f <- as.data.frame(Reduce("rbind", results_2f))
 colnames(results_plot_2f) <- colnames(dia2e_x)
-results_plot_2f$lambda <- log(sqrt(lambda_2f$lambda_sq))
-results_plot_2f <- melt(results_plot_2f, id.vars = names(results_plot_2f)[11])
+results_plot_2f$lambda <- log(sqrt(lambda_2f$lambda_sq)) # return to log lambda
+results_plot_2f2 <- melt(results_plot_2f, id.vars = names(results_plot_2f)[11])
 ```
 
 ```{r}
-ggplot(results_plot_2f, aes(lambda, value, color = variable)) +
+ggplot(results_plot_2f2, aes(-lambda, value, color = variable)) +
   geom_smooth(method = loess, se = FALSE) +
-  theme_bw()
+  theme_bw() +
+  xlim(2.5, 15) +
+  ggtitle("Regularization Path of MCMC") + xlab("-log lambda") + ylab("beta")
 ```
 
 ```{r}
+# lasso using glmnet
 plot_glmnet(lasso_2e)
 ```
+As we can see from the regularization path, the betas estimated by Bayesian Adaptive Lasso and `glmnet` method are mostly consistent. 
 
 $\textbf{(g)}$. Free $\lambda$ and carry out a sensitivity analysis assessing the behavior of the posterior distribution of $\beta$ and $\sigma^2$, as hyper parameters $a$ and $b$ are changed. Explain clearly the rationale you use to assess sensitivity and provide recommendations for the analysis of the `diabetes` data.
 
+For this question we set different values of $a$ and $b$ and add another option in our function of $\textbf{(e)}$, generate $\lambda$ with different $a$ and $b$ and get $\beta$.
+
 ```{r}
-ab_2g <- data.frame(a = c(0.5,1,5,10,15),
-                    b = c(0.5,1,5,10,15))
+# set different pairs of a and b
+ab_2g <- data.frame(a = c(1, 1, 1, 5, 10),
+                    b = c(1, 5, 10, 10, 10))
 
 test_2g <- apply(ab_2g, 1, 
               function(ab){
                 return(gibbs_2e(init_2e, nsim = 10000, burn = 0.1,
                                 a = ab[1], b = ab[2], sen_analysis = TRUE))})
+# assess the behavior of beta
+results_2g_beta <- lapply(test_2g, 
+                     function(x){apply(x$beta, 2,
+                                       function(beta){
+                                         quantile(beta, c(0.25, 0.5, 0.75))}
+                                       )})
+# assess the behavior of sigma^2
+results_2g_sigmasq <- lapply(test_2g, 
+                     function(x){apply(x$sigma_sq %>% as.matrix, 2,
+                                       function(sigma_sq){
+                                         quantile(sigma_sq, c(0.25, 0.5, 0.75))}
+                                       )})
 
-results_2g <- lapply(test_2g, function(x){apply(x$beta, 2,
-                                                function(beta){
-                                                  quantile(beta,c(0.1, 0.5, 0.9))}
-                                          )})
-results_ci_2g <- data.frame(Reduce("rbind", results_2g))
-colnames(results_ci_2g) <- colnames(dia2e_x)
 
-df_compare <- matrix(NA, 10, 5)
+# merge the result of beta and sigma^2
+results_ci_2g_beta <- data.frame(Reduce("rbind", results_2g_beta))
+results_ci_2g_sigma_sq <- data.frame(Reduce("rbind", results_2g_sigmasq))
+ci_2g <- cbind(results_ci_2g_beta, results_ci_2g_sigma_sq)
+
+
+colnames(ci_2g) <- c(colnames(dia2e_x), "sigma^2")
+
+compare_2g <- matrix(NA, 11, 5)
 for(i in 0:4){
-  for(j in 1:10){
-    df_compare[j, i + 1] <- paste0(round(results_ci_2g[3*i+2,j],2),"(",
-                                   round(results_ci_2g[3*i+1,j],2), ", ",
-                                   round(results_ci_2g[3*i+3,j],2), ")")
+  for(j in 1:11){
+    compare_2g[j, i + 1] <- paste0(round(ci_2g[3 * i + 2, j], 2),"(",
+                                   round(ci_2g[3 * i + 1, j], 2), ", ",
+                                   round(ci_2g[3 * i + 3, j], 2), ")")
   }
 }
+
+rownames(compare_2g) <- c(colnames(dia2e_x), "sigma_sq")
+colnames(compare_2g) <- paste0("a = ", ab_2g$a, ", b = ", ab_2g$b)
+
+compare_2g %>%
+  kbl(caption = NULL) %>%
+  kable_classic(full_width = T, html_font = "Cambria")
 ```
 
+As we can see, if we fix $a=1$, the coefficient estimates look reasonable but $a$ can heavily influence our estimation, therefore we need to set $a$ to be 1. For $b$, since $\tau^2$ is really large so the value of $b$ can't influence the result that much, it still makes sense if we set $b$ to be larger.
