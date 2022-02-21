@@ -1,0 +1,292 @@
+---
+title: "Biostat276 Project 2"
+author: "Zhaodong Wu"
+date: "2/16/2022"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Bayesian Probit Regression
+
+In `R` load the `package (survival)` and consider the analysis of the data-set `(infert)`. Ignoring dependence due to matching, consider a Bayesian analysis for a logistic regression model relating case status to: age, parity, education, spontaneous and induced. More precisely, assume case status $y_i$ has density $y_i \sim_{ind} Bern(p_i)$, $p_i = \Phi(X_i′\beta)$, where $\Phi(\cdot)$ is the standard Gaussian cdf. Consider a prior $\beta ∼ N (0, 10^2 (X′X )^{−1})$. We are interested in $p(\beta | Y )$.
+
+```{r}
+rm(list = ls())
+library(ggplot2)
+library(tidyverse)
+library(mvtnorm)
+library(kableExtra)
+library(truncnorm)
+```
+
+```{r}
+# load the data
+library(survival)
+data("infert")
+
+# change the data type of `education`
+inferthw <- infert 
+inferthw$education <- as.numeric(inferthw$education) - 1
+dat <- inferthw %>%
+  dplyr::select(c("education", "age", "parity", "induced", "case", 
+                  "spontaneous"))
+str(dat) # all variables are numeric
+```
+
+## Frequentist Method (Not related to the questions, just a try)
+
+Before answering the questions, we can directly compute the MLE of the model parameters using `glm()` function with a probit link function. 
+
+```{r}
+freq <- glm(case ~ age + parity + education + spontaneous + induced, 
+            data = dat, family = binomial(link = probit))
+```
+
+```{r}
+# MLE estimator
+freq$coefficients
+
+# Deviance
+freq$deviance # the deviance is large
+```
+
+
+## Question 1
+
+$~\\$ (1) Describe and implement an adaptive Metropolis-Hastings algorithm designed to obtain a MC with stationary distribution $p(\beta | Y )$.
+
+The full posterior distribution for the Bayesian binary probit model can be computed as follows:
+
+\begin{eqnarray}
+\pi(\beta | Y, X) &\propto& \pi(\beta) \cdot \pi(Y, X| \beta) \nonumber \\
+&=& \pi(\beta) \cdot \prod_{i=1}^n p(y_i, X_i| \beta) \nonumber \\
+&=& \pi(\beta) \cdot \prod_{i=1}^n \Phi(X_i′\beta)^{y_i}[1-\Phi(X_i′\beta)]^{1-y_i} \nonumber \\
+&\propto& \text{exp}[-\frac{\beta'(X' X)\beta}{200}] \cdot \prod_{i=1}^n \Phi(X_i′\beta)^{y_i}[1-\Phi(X_i′\beta)]^{1-y_i} \nonumber
+\end{eqnarray}
+
+It's obvious that $\pi(\beta)$ is not a conjugate prior by the fact that no conjugate prior $\pi(\beta)$ exists for the parameters of the probit regression model.
+
+We compute the posterior distribution first:
+
+```{r}
+# Calculation of posterior
+beta_prior <- 100 * solve(as.matrix(t(dat[, -5])) %*% as.matrix(dat[, -5]))
+
+posterior <- function(beta) {
+  pi <- pnorm(as.matrix(dat[, -5]) %*% t(beta))
+  data <- data.frame(pi = pi, y = dat[, 5])
+  post <- apply(data, 1, function(x) {ifelse(x[2] == 1, x[1], 1 - x[1])})
+  post <- log(post) %>% 
+    sum(.) - 1/2 * beta %*% solve(beta_prior) %*% t(beta)
+}
+
+```
+
+```{r}
+# Adaptive Random Walk-Metropolis Hastings
+mh.Q1 <- function(nsim = 10000, burn = 0.2, # chain parameters
+                  delta = 0.75, c = 1,       # set c = 1 (c > 0)
+                  seed = 1998) {
+  # initialization----------------------------------
+  set.seed(seed)
+  nsim1 <- nsim * (1 + burn) 
+  burni <- nsim * burn
+  
+  beta_num <- dim(dat)[2] - 1
+  
+  beta <- matrix(data = rep(0, beta_num), nrow = 1)
+  beta.ch <- matrix(data = NA, nrow = nsim, ncol = beta_num)
+  betavar <- diag(beta_num) * (10^(-14)) # error term \epsilon
+  deltaset <- rbinom(nsim1, 1, delta)
+  # run chain---------------------------------------
+  
+  for (i in 1:nsim1) {
+    # here we use adaptive MH for the first 2200 iterations 
+    if (i <= 2200) { 
+    # \Sigma^{\tilde}_t = \Sigma_t + \epsilon*I
+    betavar <- (betavar * (i - 1) + t(beta) %*% beta)/i + 
+      diag(beta_num) * (10^(-14))
+    delta_tm <- deltaset[i] # delta = 0.75 during adaptive
+    } else {delta_tm <- 1} # delta is fixed after adaptive
+    # use the last variance of beta from adaptive for the remaining iterations
+    beta_tm1 <- rmvnorm(n = 1, mean = beta, sigma = c * betavar)
+    beta_tm2 <- rmvnorm(n = 1, mean = beta, sigma = beta_prior)
+    beta_tm <- beta_tm1 * delta_tm + beta_tm2 * (1 - delta_tm)
+    
+    P0 <- posterior(beta)
+    P1 <- posterior(beta_tm)
+    ratio <- P1 - P0
+    if (log(runif(1)) < ratio) {
+      beta <- beta_tm
+    }
+    # Store Chain after burn
+    if (i > burni) {
+      i1 <- i - burni
+      beta.ch[i1, ] <- beta
+      }
+    }
+  return(list(beta = beta.ch))
+}
+
+# Simulation
+arw_mh <- mh.Q1(nsim = 10000, burn = 0.2, delta = 0.75, c = 1)
+```
+
+```{r}
+# convergence checking
+par(mfrow = c(2, 3))
+for (i in 1:5) {
+  plot(1:10000, arw_mh$beta[, i], type = "l", 
+       ylab = substitute(beta[x], list(x = i)))
+}
+```
+
+```{r}
+# Autocorrelation plot
+par(mfrow = c(2, 3))
+for (i in 1:5) {
+  acf(arw_mh$beta[, i], main = substitute(beta[x], list(x = i)))
+} # autocorrelation plots look good (beta_2 is kind of worse but acceptable)
+```
+
+```{r}
+# get the result
+result_Q1 <- apply(arw_mh$beta, 2, 
+                   function(x) {quantile(x, c(0.025, 0.5, 0.975))}) %>% 
+  round(., 3) # 95% credible interval & median
+colnames(result_Q1) <- colnames(dat)[-5]
+
+result_Q1 %>%
+  kbl(caption = "Summary Table of Coefficients Using Adaptive MH") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+
+## Question 2
+
+$~\\$ Describe and implement a data augmented (DA-MCMC) strategy targeting $p(\beta | y)$.
+
+Here targeting $p(\beta, z|y)$ could be easier enough.
+
+Let prior of $\beta: \beta \sim \mathcal{N} (0, \Sigma_{\beta}), \text{ i.e. } \Sigma_{\beta} = 10^2(X'X)^{-1})$
+
+Let $Z_i | \beta \sim \mathcal{N}(X_i'\beta, 1)$ and define the sampling model conditionally as $Y_i | Z_i = I(Z_i > 0)$. Then we use the Gibbs Sampling:
+
+For $\beta:$
+
+\begin{eqnarray}
+p(\beta|Z_{1:n}, Y_{1:n}) &=& p(\beta|Z_{1:n}) \nonumber \\
+&\propto& \prod_{i=1}^n \text{exp}[-\frac{-(z_i - X_i' \beta)^2}{2}] \cdot  \text{exp}(-\frac{\beta^T  \Sigma_{\beta}^{-1} \beta}{2}) \nonumber \\
+&=& \text{exp}[-\frac{(Z-X\beta)'(Z-X\beta) + \beta'  \Sigma_{\beta}^{-1}} \beta{2}] \nonumber \\
+&\propto& \text{exp}[\frac{\beta'(X'X + \Sigma_{\beta}^{-1})\beta - 2\beta'X'Z}{2}] \nonumber
+\end{eqnarray}
+
+By completing the square, we realize that the density is proportional to a normal kernel, the posterior of $\beta$ satisfies a normal distribution:
+\begin{eqnarray}
+p(\beta|Z_{1:n}, Y_{1:n}) \sim \mathcal{N} \{(X'X + \Sigma_{\beta}^{-1})^{-1}X'Z, (X'X + \Sigma_{\beta}^{-1})^{-1}\} \nonumber
+\end{eqnarray}
+
+For $Z_i:$
+
+\begin{eqnarray}
+p(Z_i | Y_i, \beta) &\propto& p(Y_i|Z_i) \cdot p(Z_i|\beta) \nonumber \\
+&=& I(Z_i > 0) \cdot \text{exp}[-\frac{-(z_i - X_i' \beta)^2}{2}] \quad (\text{if }y_i = 1) \nonumber \\
+&=& I(Z_i \le 0) \cdot \text{exp}[-\frac{-(z_i - X_i' \beta)^2}{2}] \quad (\text{if }y_i = 0) \nonumber
+\end{eqnarray}
+
+The posterior of $Z_i$ follows a $\textbf{truncated normal distributon}, \text{ i.e. }$
+\begin{equation}
+p(Z_i | Y_i, \beta) = 
+\begin{cases}
+\mathcal{TN}(X_i' \beta, 1, 0, +\infty) & \text{if $y_i = 1$} \nonumber \\
+\mathcal{TN}(X_i' \beta, 1, -\infty, 0) & \text{if $y_i = 0$} \nonumber
+\end{cases}
+\end{equation}
+
+```{r}
+DA_Q2 <- function(nsim = 10000, burn = 0.2, # chain parameters
+                  seed = 1998,
+                  x = as.matrix(dat[-5]), # load the dataset
+                  y = as.matrix(dat[5])) {
+  # initialization----------------------------------
+  set.seed(seed)
+  nsim1 <- nsim * (1 + burn) 
+  burni <- nsim * burn
+  
+  beta_num <- dim(dat)[2] - 1
+  
+  beta <- matrix(data = rep(0, beta_num), nrow = 1)
+  beta.ch <- matrix(data = NA, nrow = nsim, ncol = beta_num)
+  
+  # generate data z----------------------------------
+  z <- rep(0, length(y))
+  z.ch <- matrix(data = NA, nrow = nsim, ncol = length(y))
+
+  range <- cbind(ifelse(y == 1, 0, -Inf),
+                 ifelse(y == 1, Inf, 0)
+                 )
+  
+  # run chain---------------------------------------
+  for (i in 1:nsim1) {
+    # z
+    z_comb <- cbind(x %*% t(beta),
+                    1,
+                    range)
+    z <- apply(z_comb, 1, function(comb) {
+      rtruncnorm(1, comb[1], sd = comb[2], a = comb[3], b = comb[4])
+    })
+    # beta
+    beta_mean <- solve(t(x) %*% x + solve(beta_prior)) %*% t(x) %*% z
+    beta_var <- solve(t(x) %*% x + solve(beta_prior)) 
+    beta <- rmvnorm(1, mean = beta_mean, sigma = beta_var)
+    
+    if (i > burni) {
+      i1 <- i - burni
+      beta.ch[i1, ] <- beta
+    }
+  }
+  return(list(beta = beta.ch))
+}
+
+# Simulation
+DA_Gibbs <- DA_Q2(nsim = 10000, burn = 0.2)
+```
+
+```{r}
+par(mfrow = c(2, 3))
+for (i in 1:5) {
+  plot(1:10000, DA_Gibbs$beta[, i], type = "l", 
+       ylab = substitute(beta[x], list(x = i)))
+}
+```
+
+```{r}
+# Autocorrelation plot
+par(mfrow = c(2, 3))
+for (i in 1:5) {
+  acf(DA_Gibbs$beta[, i], main = substitute(beta[x], list(x = i)))
+} # autocorrelation plots look good (beta_2 is kind of worse but acceptable)
+```
+
+```{r}
+# get the result
+result_Q2 <- apply(DA_Gibbs$beta, 2, 
+                   function(x) {quantile(x, c(0.025, 0.5, 0.975))}) %>% 
+  round(., 3) # 95% credible interval & median
+colnames(result_Q2) <- colnames(dat)[-5]
+
+result_Q2 %>%
+  kbl(caption = "Summary Table of Coefficients using Data Augmentation") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+
+## Question 3
+
+Describe and implement a parameter expanded - data augmentation (PX-DA MCMC) algorithm targeting
+$p(\beta | Y )$.
