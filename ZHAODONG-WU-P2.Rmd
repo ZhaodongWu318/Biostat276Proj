@@ -1,6 +1,9 @@
 ---
 title: "Biostat276 Project 2"
 author: "Zhaodong Wu"
+header-includes:
+  - \usepackage{float}
+  - \floatplacement{figure}{H}
 date: "2/16/2022"
 output: 
   pdf_document:
@@ -24,6 +27,8 @@ library(tidyverse)
 library(mvtnorm)
 library(kableExtra)
 library(truncnorm)
+library(profmem)
+library(microbenchmark)
 ```
 
 ```{r}
@@ -62,7 +67,7 @@ freq$deviance # the deviance is large
 
 $~\\$ (1) Describe and implement an adaptive Metropolis-Hastings algorithm designed to obtain a MC with stationary distribution $p(\beta | Y )$.
 
-The full posterior distribution for the Bayesian binary probit model can be computed as follows:
+$\textbf{Solution: }$ The full posterior distribution for the Bayesian binary probit model can be computed as follows:
 
 \begin{eqnarray}
 \pi(\beta | Y, X) &\propto& \pi(\beta) \cdot \pi(Y, X| \beta) \nonumber \\
@@ -140,39 +145,18 @@ arw_mh <- mh.Q1(nsim = 10000, burn = 0.2, delta = 0.75, c = 1)
 ```
 
 ```{r}
-# convergence checking
-par(mfrow = c(2, 3))
-for (i in 1:5) {
-  plot(1:10000, arw_mh$beta[, i], type = "l", 
-       ylab = substitute(beta[x], list(x = i)))
-}
-```
-
-```{r}
-# Autocorrelation plot
-par(mfrow = c(2, 3))
-for (i in 1:5) {
-  acf(arw_mh$beta[, i], main = substitute(beta[x], list(x = i)))
-} # autocorrelation plots look good (beta_2 is kind of worse but acceptable)
-```
-
-```{r}
 # get the result
 result_Q1 <- apply(arw_mh$beta, 2, 
                    function(x) {quantile(x, c(0.025, 0.5, 0.975))}) %>% 
   round(., 3) # 95% credible interval & median
 colnames(result_Q1) <- colnames(dat)[-5]
-
-result_Q1 %>%
-  kbl(caption = "Summary Table of Coefficients Using Adaptive MH") %>%
-  kable_classic(full_width = F, html_font = "Cambria")
 ```
 
 ## Question 2
 
 $~\\$ Describe and implement a data augmented (DA-MCMC) strategy targeting $p(\beta | y)$.
 
-Here targeting $p(\beta, z|y)$ could be easier enough.
+$\textbf{Solution: }$ Here targeting $p(\beta, z|y)$ could be easier enough.
 
 Let prior of $\beta: \beta \sim \mathcal{N} (0, \Sigma_{\beta}), \text{ i.e. } \Sigma_{\beta} = 10^2(X'X)^{-1})$
 
@@ -228,24 +212,26 @@ DA_Q2 <- function(nsim = 10000, burn = 0.2, # chain parameters
   z <- rep(0, length(y))
   z.ch <- matrix(data = NA, nrow = nsim, ncol = length(y))
 
-  range <- cbind(ifelse(y == 1, 0, -Inf),
-                 ifelse(y == 1, Inf, 0)
-                 )
+  interval <- cbind(ifelse(y == 1, 0, -Inf),
+                    ifelse(y == 1, Inf, 0)
+                    )
   
   # run chain---------------------------------------
   for (i in 1:nsim1) {
     # z
-    z_comb <- cbind(x %*% t(beta),
-                    1,
-                    range)
+    z_comb <- cbind(x %*% t(beta),    # mean of z
+                    1,                # variance of z
+                    interval)         # interval of z
     z <- apply(z_comb, 1, function(comb) {
       rtruncnorm(1, comb[1], sd = comb[2], a = comb[3], b = comb[4])
     })
+    
     # beta
     beta_mean <- solve(t(x) %*% x + solve(beta_prior)) %*% t(x) %*% z
     beta_var <- solve(t(x) %*% x + solve(beta_prior)) 
     beta <- rmvnorm(1, mean = beta_mean, sigma = beta_var)
     
+    # Store Chain after burn
     if (i > burni) {
       i1 <- i - burni
       beta.ch[i1, ] <- beta
@@ -259,34 +245,287 @@ DA_Gibbs <- DA_Q2(nsim = 10000, burn = 0.2)
 ```
 
 ```{r}
-par(mfrow = c(2, 3))
-for (i in 1:5) {
-  plot(1:10000, DA_Gibbs$beta[, i], type = "l", 
-       ylab = substitute(beta[x], list(x = i)))
-}
-```
-
-```{r}
-# Autocorrelation plot
-par(mfrow = c(2, 3))
-for (i in 1:5) {
-  acf(DA_Gibbs$beta[, i], main = substitute(beta[x], list(x = i)))
-} # autocorrelation plots look good (beta_2 is kind of worse but acceptable)
-```
-
-```{r}
 # get the result
 result_Q2 <- apply(DA_Gibbs$beta, 2, 
                    function(x) {quantile(x, c(0.025, 0.5, 0.975))}) %>% 
   round(., 3) # 95% credible interval & median
 colnames(result_Q2) <- colnames(dat)[-5]
-
-result_Q2 %>%
-  kbl(caption = "Summary Table of Coefficients using Data Augmentation") %>%
-  kable_classic(full_width = F, html_font = "Cambria")
 ```
 
 ## Question 3
 
 Describe and implement a parameter expanded - data augmentation (PX-DA MCMC) algorithm targeting
 $p(\beta | Y )$.
+
+$\textbf{Solution: }$ The Standard Probit Regression is:
+
+$$ 
+Z_i | \beta \sim \mathcal{N}(X_i'\beta, 1), \quad Y_i|Z_i \sim I(Z_i > 0)
+$$
+
+Now we do the parameter expansion:
+\begin{eqnarray}
+W_i | \beta, \alpha &\sim& \mathcal{N}(X_i' \beta \alpha, \alpha^2) \nonumber \\
+Y_i | W_i &=& I(W_i > 0) \nonumber \\
+\alpha^2 &\sim& InverseGamma(a, b) \nonumber
+\end{eqnarray}
+
+For $\beta:$
+
+Then we calculate the full posterior distribution of $\beta, \sigma^2$ and $w$:
+\begin{eqnarray}
+p(\beta | W_{1:n}, \alpha) &\propto& p(W_{1:n }|\alpha, \beta) \cdot p(\alpha, \beta) \nonumber \\
+&=& p(W_{1:n }|\alpha, \beta) \cdot p(\alpha) p(\beta) \nonumber \\
+&\propto& p(W_{1:n }|\alpha, \beta) \cdot p(\beta) \nonumber \\
+&\propto& \prod_{i=1}^n\text{exp}[-\frac{(w_i - X_i'\beta \alpha)^2}{2\alpha^2}]\cdot \text{exp}(-\frac{\beta'\Sigma_{\beta}^{-1}\beta}{2}) \nonumber \\
+&=& \text{exp}[-\frac{(W-\alpha X \beta)'(W-\alpha X \beta) + \alpha^2\beta' \Sigma_{\beta}^{-1}\beta}{2\sigma^2}] \nonumber \\
+&\propto& \text{exp}(-\frac{\beta'(X'X+\Sigma_{\beta}^{-1})\beta-2\frac{\beta'X'W}{\alpha}}{2}) \nonumber
+\end{eqnarray}
+
+By completing the square, we realize that the density is proportional to a normal kernel, the posterior of $\beta$ satisfies a normal distribution:
+\begin{eqnarray}
+p(\beta | W_{1:n}, \alpha) \sim \mathcal{N}\{(X'X+\Sigma_{\beta}^{-1})^{-1}\frac{X'W}{\alpha}, (X'X+\Sigma_{\beta}^{-1})^{-1}\} \nonumber
+\end{eqnarray}
+
+For $\alpha^2:$
+\begin{eqnarray}
+p(\alpha^2|W, \beta) &\propto& \propto p(W_i | \beta, \alpha^2) \cdot p(\alpha^2) \nonumber \\
+&\propto& \prod_{i=1}^n \frac{1}{\alpha} \cdot \text{exp}[-\frac{(w_i - X_i'\beta \alpha)^2}{2\alpha^2}] \cdot (\frac{1}{\alpha^2})^{a+1} \text{exp}(-\frac{b}{\alpha^2}) \nonumber \\
+&=& \text{exp}[-\frac{\sum_{i=1}^n (w_i - X_i'\beta \alpha)^2 + 2b}{2\alpha^2}] \cdot (\frac{1}{\alpha^2})^{a+\frac{n}{2} + 1}
+\end{eqnarray}
+
+For $W_i:$
+\begin{eqnarray}
+p(W_i|Y_i, \alpha, \beta) &\propto& p(Y_i|W_i) \cdot p(W_i|\alpha, \beta) \nonumber \\
+&=& I(W_i >0) \cdot \text{exp}[-\frac{-(w_i - X_i' \beta \alpha)^2}{2 \alpha^2}] \quad (\text{if }y_i = 1) \nonumber \\
+&=& I(W_i \le 0) \cdot \text{exp}[-\frac{-(w_i - X_i' \beta \alpha)^2}{2 \alpha^2}] \quad (\text{if }y_i = 0) \nonumber
+\end{eqnarray}
+
+The posterior of $W_i$ follows a $\textbf{truncated normal distributon}, \text{ i.e. }$
+\begin{equation}
+p(W_i | Y_i, \alpha, \beta) = 
+\begin{cases}
+\mathcal{TN}(X_i' \beta \alpha, \alpha^2, 0, +\infty) & \text{if $y_i = 1$} \nonumber \\
+\mathcal{TN}(X_i' \beta \alpha, \alpha^2, -\infty, 0) & \text{if $y_i = 0$} \nonumber
+\end{cases}
+\end{equation}
+
+```{r}
+alpha_post <- function(alpha_sq, w, x, beta,
+                       a = 5,  # a, b are paras for sigma_sq ~ InverseGamma 
+                       b = 5) {
+  f <- -(t(w - x %*% t(beta) * sqrt(alpha_sq)) %*% 
+               (w - x %*% t(beta) *sqrt(alpha_sq)) + 2*b)/(2 * alpha_sq) + 
+    (a + 1 + 248/2) * log(1/alpha_sq)
+  return(f)
+}
+
+```
+
+
+```{r}
+PXDA_Q3 <- function(nsim = 10000, burn = 0.2, # chain parameter
+                    seed = 1998, 
+                    x = as.matrix(dat[-5]),
+                    y = as.matrix(dat[5]),
+                    eta = 0.05) { # random walk jump size
+  # initialization----------------------------------
+  set.seed(seed)
+  nsim1 <- nsim * (1 + burn) 
+  burni <- nsim * burn
+  
+  beta_num <- dim(dat)[2] - 1
+  beta <- matrix(data = rep(0, beta_num), nrow = 1)
+  beta.ch <- matrix(data = NA, nrow = nsim, ncol = beta_num)
+  alpha_sq <- 1
+  alpha_sq.ch <- vector()
+  
+  # generate data w----------------------------------
+  w <- rep(1, length(y))
+  w.ch <- matrix(data = NA, nrow = nsim, ncol = length(y))
+
+  
+  interval <- cbind(ifelse(y == 1, 0, -Inf),
+                    ifelse(y == 1, Inf, 0)
+                    )
+
+  # run chain---------------------------------------
+  for (i in 1:nsim1) {
+    # beta
+    bmean <- solve(t(x) %*% x + solve(beta_prior)) %*% t(x) %*% w/sqrt(alpha_sq)
+    bvar <- solve(t(x) %*% x + solve(beta_prior)) 
+    beta <- rmvnorm(1, mean = bmean, sigma = bvar)
+    
+    # w_i
+    w_comb <- cbind(x %*% t(beta) * sqrt(alpha_sq),              # mean of w
+                              sqrt(rep(alpha_sq, length(y))),    # variance of w
+                              interval)                          # interval of w
+    w <- apply(w_comb, 1, function(comb) {
+      rtruncnorm(1, comb[1], sd = comb[2], a = comb[3], b = comb[4])
+    })
+    
+    # alpha_sq :Using RW-MH: alpha_sq* | alpha_sq ~ N(alpha_sq, eta)
+    alpha_sq_tm <- rnorm(1, alpha_sq, eta)
+    P0 <- alpha_post(alpha_sq, w = w, x = x, beta = beta) 
+    P1 <- alpha_post(alpha_sq_tm, w = w, x = x, beta = beta) 
+    ratio <- P1 - P0
+    
+    if (log(runif(1)) < ratio) {
+      alpha_sq <- alpha_sq_tm
+    }
+    
+    
+    # Store Chain after burn
+    if (i > burni) {
+      i1 <- i - burni
+      beta.ch[i1, ] <- beta
+      alpha_sq.ch[i1] <- alpha_sq
+      w.ch[i1, ] <- w
+    }
+  }
+  return(list(beta = beta.ch, alpha_sq =  alpha_sq.ch))
+}
+
+# Simulation
+PXDA <- PXDA_Q3(nsim = 10000, burn = 0.2)
+```
+
+```{r}
+# get the result
+result_Q3 <- apply(PXDA$beta, 2, 
+                   function(x) {quantile(x, c(0.025, 0.5, 0.975))}) %>% 
+  round(., 3) # 95% credible interval & median
+colnames(result_Q3) <- colnames(dat)[-5]
+```
+
+## Question 4
+
+Assess mixing and convergence of the chains induced by the competing transition schemes implemented in 1,2 and 3. Comment on potential trade-offs involving: coding complexity, storage and cpu time.
+
+$\textbf{Solution: }$
+
+```{r}
+# Plots
+# Adaptive Random Walk Metropolis Hasting
+  # Convergence Checking
+par(mfrow = c(2, 3))
+for (i in 1:5) {
+  plot(1:10000, arw_mh$beta[, i], type = "l", 
+       ylab = substitute(beta[x], list(x = i)))
+}
+
+  # Autocorrelation plot
+par(mfrow = c(2, 3))
+for (i in 1:5) {
+  acf(arw_mh$beta[, i], main = substitute(beta[x], list(x = i)))
+} # autocorrelation plots look good (beta_2 is kind of worse but acceptable)
+
+
+# Data Augmentation
+  # convergence checking
+par(mfrow = c(2, 3))
+for (i in 1:5) {
+  plot(1:10000, DA_Gibbs$beta[, i], type = "l", 
+       ylab = substitute(beta[x], list(x = i)))
+}
+
+  # Autocorrelation plot
+par(mfrow = c(2, 3))
+for (i in 1:5) {
+  acf(DA_Gibbs$beta[, i], main = substitute(beta[x], list(x = i)))
+} # autocorrelation plots look good (beta_2 is kind of worse but acceptable)
+
+
+# PX-DA
+  # convergence checking
+par(mfrow = c(2, 3))
+for (i in 1:5) {
+  plot(1:10000, PXDA$beta[, i], type = "l", 
+       ylab = substitute(beta[x], list(x = i)))
+}
+
+  # Autocorrelation plot
+par(mfrow = c(2, 3))
+for (i in 1:5) {
+  acf(PXDA$beta[, i], main = substitute(beta[x], list(x = i)))
+} # autocorrelation plots look good (beta_2 is kind of worse but acceptable)
+```
+
+```{r}
+# Combined table
+result_Q4 <- rbind(result_Q1, result_Q2, result_Q3) %>% as.data.frame(.)
+result_comb <- matrix(data = NA, nrow = 3, ncol = 5)
+colnames(result_Q4) <- colnames(dat[-5])
+
+for (i in 1:5) {
+  for (j in 1:3) {
+    result_comb[j, i] <- paste0(result_Q4[3*j - 1, i], "(",
+                                result_Q4[3*j - 2, i], ",",
+                                result_Q4[3*j, i], ")")
+  }
+} 
+colnames(result_comb) <- colnames(dat[-5])
+```
+
+```{r}
+result_comb %>%
+  kbl(caption = "Summary Table of Coefficients with 95% CI") %>%
+  kable_classic(full_width = F, html_font = "Cambria", position = "center",
+                latex_options = "HOLD_position")
+```
+
+```{r}
+# Calculate storage
+storage_arwmh <- profmem(mh.Q1(nsim = 10000, burn = 0.2, delta = 0.75, c = 1))
+storage_da <- profmem(DA_Q2(nsim = 10000, burn = 0.2))
+storage_pxda <- profmem(PXDA_Q3(nsim = 10000, burn = 0.2))
+```
+
+```{r}
+storage <- data.frame(Method = c("Adaptive RW-MH", "DA", "PX-DA"),
+                      Storage = c(storage_arwmh$bytes %>% sum(na.rm = TRUE),
+                                  storage_da$bytes %>% sum(na.rm = TRUE),
+                                  storage_pxda$bytes %>% sum(na.rm = TRUE)))
+
+storage %>%
+  kbl(caption = "Summary Table of Memory Use") %>%
+  kable_classic(full_width = F, html_font = "Cambria", position = "center",
+                latex_options = "HOLD_position")
+```
+
+```{r}
+# CPU Time
+  # Adaptive Random-Walk Metropolis Hasting
+time.arw.mh <- matrix(data = NA, nrow = 5, ncol = 5)
+for (i in 1:5) {
+ time.arw.mh[i, ] <- system.time(mh.Q1(nsim = 10000, burn = 0.2, 
+                                       delta = 0.75, c = 1)) 
+}
+
+  # Data Augmentation
+time.da <- matrix(data = NA, nrow = 5, ncol = 5)
+for (i in 1:5) {
+  time.da[i, ] <- system.time(DA_Q2(nsim = 10000, burn = 0.2))
+}
+
+  # Parameter Expansions with Data Augmentation
+time.pxda <- matrix(data = NA, nrow = 5, ncol = 5)
+for (i in 1:5) {
+ time.pxda[i, ] <-system.time(PXDA_Q3(nsim = 10000, burn = 0.2))
+}
+
+```
+
+```{r}
+cpu_time <- rbind(colMeans(time.arw.mh), colMeans(time.da), colMeans(time.pxda))
+colnames(cpu_time) <- c("user", "system", "elapsed", 
+                        "user_child", "system_child")
+cpu_time %>%
+  kbl(caption = "Summary Table of CPU time") %>%
+  kable_classic(full_width = F, html_font = "Cambria", position = "center",
+                latex_options = "HOLD_position")
+```
+
+According to the result, `Adaptive Metropolis Hasting` uses the least storage, while `Data Augmentation` and `PX-DA` takes similar storage . As for running time, `Data Augmentation` is a little bit more efficient than `PX-DA` and both of them are much more efficient than `Adaptive Metropolis Hasting`. For the convergence condition, `Data Augmentation` and `PX-DA` are better than `Adaptive Metropolis Hasting`, and $\beta_4$ obtained by `PX-DA` converged faster than `Data Augmentation`.
+
+In conclusion, `Adaptive Metropolis Hasting` takes the least storage, `Data Augmentation` is the most efficient method, and `PX-DA` has the best convergence of the Markov Chains.
