@@ -1,0 +1,335 @@
+---
+title: "Biostat276 Project 3"
+author: "Zhaodong Wu"
+date: "3/3/2022"
+output:   
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = FALSE}
+rm(list = ls())
+library(ggplot2)
+library(tidyverse)
+library(lme4)
+library(MCMCpack)
+```
+
+
+# Bayesian Mixed-Effects Model
+
+Consider the dataset `sleepstudy` available from the `R` package `lme4`.  These data, reports a longitudinal
+study of reaction times after sleep deprivation. Let $y_{ij}$ be the reaction of subject $i$ after $t_{ij}$
+days of sleep deprivation. We assume:
+
+$$
+y_{ij} \sim N(\mu_{ij},\sigma^2)
+$$
+
+with $\mu_{ij} = \beta_0 + \beta_1 t_{ij} + b_{i0} + b_{i1}t_{ij}, b_{i0} \sim N(0, \alpha_0)$ independent of $b_{i1} \sim N(0, \alpha_1)$ for all $i$. The model is completed with the following priors:
+
+\begin{eqnarray}
+\beta_0 &\sim& N(0, 100.0) \nonumber \\
+\beta_1 &\sim& N(0, 100.0) \nonumber \\
+\alpha_0 &\sim& IG(1.0, 1.0) \nonumber \\
+\alpha_1 &\sim& IG(1.0, 1.0) \nonumber \\
+\sigma^2 &\sim& IG(0.01, 0.01) \nonumber
+\end{eqnarray}
+
+where all $IG$ priors use the shape, scale parametrization. 
+$~\\$  $~\\$ 
+(1) Describe and implement a Gibbs sampling strategy for MCMC simulation from the posterior distribution.
+$$
+p(\beta_0, \beta_1, \alpha_0, \alpha_1, \sigma^2 | \boldsymbol{y})
+$$
+
+Derive posterior summaries for all population level parameters, including posterior means, posterior SDs
+and, $95\%$ credible intervals.
+$~\\$  $~\\$ 
+(2) Implement an HMC sampler for MCMC simulation for the posterior distribution in (1). Compare all
+posterior summaries with the estimates obtained using Gibbs sampling.
+$~\\$  $~\\$ 
+(3) Compare convergence and mixing associated with the posterior simulations algorithms in (1) and (2).
+$~\\$ $~\\$ $\textbf{Solutions: }$
+$~\\$ $\textbf{(1)}$
+
+```{r}
+# load the data
+data("sleepstudy")
+dat <- sleepstudy
+str(dat)
+```
+
+Then we should calculate posteriors for all population level parameters:
+
+Let $m = \text{ number of rows}, n = \text{ number of columns}$.
+
+$~\\$ For $\beta_0:$
+
+\begin{eqnarray}
+p(\beta_0 | \beta_1, b_{i0}, b_{i1}, \sigma^2, y) &\propto& \prod_{i=1}^m \prod_{j=1}^n p(y_{ij}|\beta_0, \beta_1, b_{i0}, b_{i1}, \sigma^2) \cdot p(\beta_0) \nonumber \\
+&\propto& \text{exp}\left \{-\frac{\sum_{i=1}^m \sum_{j=1}^n (y_{ij} - \beta_0 - \beta_1 t_{ij} - b_{i0} - b_{i1}t_{ij})^2}{2\sigma^2} - \frac{\beta_0^2}{200}) \right \} \nonumber  \\
+&\propto& \text{exp} \left \{ -\frac{(\sigma^2 + 100mn)\beta_0^2 - 2\beta_0 \cdot 100\sum_{i=1}^m \sum_{j=1}^n(y_{ij} - \beta_1t_{ij} - b_{i0} - b_{i1}t_{ij} )}{200 \sigma^2} \right \} \nonumber \\
+&=& \text{exp} \left \{ -\frac{(\frac{\sigma^2 + 100mn}{100 \sigma^2})\beta_0^2 - 2\beta_0\frac{100\sum_{i=1}^m \sum_{j=1}^n(y_{ij} - \beta_1t_{ij} - b_{i0} - b_{i1}t_{ij})}{100 \sigma^2}}{2} \right \} \nonumber
+\end{eqnarray}
+
+We get that the posterior of $\beta_0$ follows a normal kernel and by completing the square, the full conditional distribution of $\beta_0$ is normal, i.e.
+$$
+\beta_0 | \beta_1, b_{i0}, b_{i1}, \sigma^2, y \sim N\left (\frac{100\sum_{i=1}^m \sum_{j=1}^n(y_{ij} - \beta_1t_{ij} - b_{i0} - b_{i1}t_{ij} )}{\sigma^2+100mn},\frac{100\sigma^2}{\sigma^2 +100mn}\right)
+$$
+
+$~\\$ For $\beta_1:$
+
+\begin{eqnarray}
+p(\beta_1 | \beta_0, b_{i0}, b_{i1}, \sigma^2, y)  &\propto& \prod_{i=1}^m \prod_{j=1}^n p(y_{ij}|\beta_0, \beta_1, b_{i0}, b_{i1}, \sigma^2) \cdot p(\beta_1) \nonumber \\
+&\propto& \text{exp}\left \{-\frac{\sum_{i=1}^m \sum_{j=1}^n (y_{ij} - \beta_0 - \beta_1 t_{ij} - b_{i0} - b_{i1}t_{ij})^2}{2\sigma^2} - \frac{\beta_1^2}{200})\right \} \nonumber  \\
+&\propto& \text{exp} \left \{ -\frac{(\sigma^2 + 100\sum_{i=1}^m \sum_{j=1}^nt_{ij}^2)\beta_1^2 - 2\beta_1 \cdot 100\sum_{i=1}^m \sum_{j=1}^n t_{ij}(y_{ij} - \beta_0- b_{i0} - b_{i1}t_{ij} )}{200 \sigma^2} \right \} \nonumber \\ 
+&=& \text{exp} \left \{ -\frac{(\frac{\sigma^2 + 100\sum_{i=1}^m \sum_{j=1}^nt_{ij}^2}{100\sigma^2})\beta_1^2 - 2\beta_1 \frac{100\sum_{i=1}^m \sum_{j=1}^n t_{ij}(y_{ij} - \beta_0- b_{i0} - b_{i1}t_{ij})}{100\sigma^2}}{2} \right \} \nonumber 
+\end{eqnarray}
+
+We get that the posterior of $\beta_1$ follows a normal kernel and by completing the square, the full conditional distribution of $\beta_1$ is normal, i.e.
+
+$$
+\beta_1 | \beta_0, b_{i0}, b_{i1}, \sigma^2, y \sim N\left (\frac{100\sum_{i=1}^m \sum_{j=1}^nt_{ij}(y_{ij} - \beta_0 - b_{i0} - b_{i1}t_{ij} )}{\sigma^2+100\sum_{i=1}^m \sum_{j=1}^nt_{ij}^2},\frac{100\sigma^2}{\sigma^2 +100\sum_{i=1}^m \sum_{j=1}^nt_{ij}^2}\right)
+$$
+
+$~\\$ For $\alpha_0:$
+
+\begin{eqnarray}
+p(\alpha_0 | b_{i0}) &\propto& p(b_{i0}|\alpha_0)p(\alpha_0) \nonumber \\
+&=& (\frac{1}{\sqrt{2 \pi \alpha_0}})^m \text{exp} \left\{-\frac{\sum_{i=1}^m b_{i0}^2}{2 \alpha_0} \right\}\cdot (\frac{1}{\alpha_0})^{1+1}\text{exp}\left\{ -\frac{1}{\alpha_0}\right\} \nonumber \\
+&=& (\frac{1}{\alpha_0})^{\frac{m}{2}+1+1}\text{exp}\left\{-\frac{\frac{\sum_{i=1}^m b_{i0}^2}{2} +1}{\alpha_0}\right\} \nonumber \\
+&\sim& IG(\frac{m}{2} + 1, \frac{\sum_{i=1}^m b_{i0}^2}{2} +1) \nonumber
+\end{eqnarray}
+
+The full conditional distribution of $\alpha_0$ follows an inverse gamma distribution, i.e.
+$$
+IG\left (\frac{m}{2} + 1, \frac{\sum_{i=1}^m b_{i0}^2}{2} +1\right) 
+$$
+$~\\$ For $\alpha_1:$
+
+\begin{eqnarray}
+p(\alpha_1 | b_{i1}) &\propto& p(b_{i1}|\alpha_1)p(\alpha_1) \nonumber \\
+&=& (\frac{1}{\sqrt{2 \pi \alpha_1}})^m \text{exp} \left\{-\frac{\sum_{i=1}^m b_{i1}^2}{2 \alpha_1} \right\}\cdot (\frac{1}{\alpha_1})^{1+1}\text{exp}\left\{ -\frac{1}{\alpha_1}\right\} \nonumber \\
+&=& (\frac{1}{\alpha_1})^{\frac{m}{2}+1+1}\text{exp}\left\{-\frac{\frac{\sum_{i=1}^m b_{i1}^2}{2} +1}{\alpha_1}\right\} \nonumber \\
+&\sim& IG(\frac{m}{2} + 1, \frac{\sum_{i=1}^m b_{i1}^2}{2} +1) \nonumber
+\end{eqnarray}
+
+The full conditional distribution of $\alpha_1$ follows an inverse gamma distribution, i.e.
+
+$$
+IG\left (\frac{m}{2} + 1, \frac{\sum_{i=1}^m b_{i1}^2}{2} +1\right) 
+$$
+
+$~\\$ For $\sigma^2:$
+
+\begin{eqnarray}
+p(\sigma^2 | \beta_0, \beta_1, b_{i0}, b_{i1}, y) &\propto& \prod_{i=1}^m \prod_{j=1}^n p(y_{ij}|\beta_0, \beta_1, b_{i0}, b_{i1}, \sigma^2) \cdot p(\sigma^2) \nonumber \\
+&\propto& (\frac{1}{\sqrt{2\pi \sigma^2}})^{mn}\text{exp}\left \{-\frac{\sum_{i=1}^m \sum_{j=1}^n (y_{ij}-\beta_0-\beta_1 t_{ij}-b_{i0} - b_{i1}t_{ij})^2}{2\sigma^2} \right\}\cdot (\frac{1}{\sigma^2})^{0.01+1}\text{exp}\left\{-\frac{0.01}{\sigma^2}\right\} \nonumber \\
+&=& (\frac{1}{\sigma^2})^{1+0.01+\frac{mn}{2}}\text{exp}\left\{ -\frac{\sum_{i=1}^m \sum_{j=1}^n (y_{ij}-\beta_0-\beta_1 t_{ij}-b_{i0} - b_{i1}t_{ij})^2 + 0.02}{2\sigma^2}\right\} \nonumber \\
+&\sim& IG(0.01+\frac{mn}{2}, \frac{\sum_{i=1}^m \sum_{j=1}^n (y_{ij}-\beta_0-\beta_1 t_{ij}-b_{i0} - b_{i1}t_{ij})^2 + 0.02}{2}) \nonumber
+\end{eqnarray}
+
+The full conditional distribution of $\sigma^2$ follows an inverse gamma distribution, i.e.
+
+$$
+\sigma^2 | \beta_0, \beta_1, b_{i0}, b_{i1}, y \sim IG\left(0.01+\frac{mn}{2}, \frac{\sum_{i=1}^m \sum_{j=1}^n (y_{ij}-\beta_0-\beta_1 t_{ij}-b_{i0} - b_{i1}t_{ij})^2 + 0.02}{2}\right)
+$$
+
+$~\\$ For $b_{i0}:$
+
+\begin{eqnarray}
+p(b_{i0}|y_i, \beta_0, \beta_1, b_{i1}, \sigma^2, \alpha_0) &\propto& \prod_{j=1}^n p(y_{ij}|\beta_0, \beta_1, b_{i0}, b_{i1}, \sigma^2) \cdot p(b_{i0} |\alpha_0) \nonumber \\
+&\propto& \text{exp}\left \{-\frac{ \sum_{j=1}^n (y_{ij}-\beta_0-\beta_1 t_{ij}-b_{i0} - b_{i1}t_{ij})^2}{2\sigma^2} -\frac{b_{i0}^2}{2\alpha_0} \right\} \nonumber \\
+&\propto& \text{exp}\left\{ -\frac{\sum_{j=1}^n[ b_{i0}^2-2b_{i0}(y_{ij}-\beta_0-\beta_1 t_{ij}-b_{i1}t_{ij})]}{2\sigma^2}-\frac{b_{i0}^2}{2\alpha_0}\right\} \nonumber \\
+&=& \text{exp}\left \{ -\frac{(\sigma^2+n\alpha_0)b_{i0}^2 - 2b_{i0}\alpha_0 \sum_{j=1}^n(y_{ij}-\beta_0-\beta_1 t_{ij}-b_{i1}t_{ij})}{2\alpha_0 \sigma^2}\right\} \nonumber \\
+&\sim& N\left (\frac{\alpha_0 \sum_{j=1}^n(y_{ij}-\beta_0-\beta_1 t_{ij}-b_{i1}t_{ij})}{\sigma^2+n\alpha_0} , \frac{\alpha_0 \sigma^2}{\sigma^2+n\alpha_0} \right) \nonumber
+\end{eqnarray}
+
+The full conditional distribution of $b_{i0}$ follows a normal distribution, i.e.
+
+$$
+b_{i0}|y_i, \beta_0, \beta_1, b_{i1}, \sigma^2, \alpha_0 \sim N\left (\frac{\alpha_0 \sum_{j=1}^n(y_{ij}-\beta_0-\beta_1 t_{ij}-b_{i1}t_{ij})}{\sigma^2+n\alpha_0} , \frac{\alpha_0 \sigma^2}{\sigma^2+n\alpha_0} \right)
+$$
+
+$~\\$ For $b_{i1}:$
+
+\begin{eqnarray}
+p(b_{i1}|y_i, \beta_0, \beta_1, b_{i0}, \sigma^2, \alpha_1) &\propto& \prod_{j=1}^n p(y_{ij}|\beta_0, \beta_1, b_{i0}, b_{i1}, \sigma^2) \cdot p(b_{i1} |\alpha_1) \nonumber \\
+&\propto& \text{exp}\left \{-\frac{ \sum_{j=1}^n (y_{ij}-\beta_0-\beta_1 t_{ij}-b_{i0} - b_{i1}t_{ij})^2}{2\sigma^2} -\frac{b_{i1}^2}{2\alpha_1} \right\} \nonumber \\
+&\propto& \text{exp}\left\{ -\frac{\sum_{j=1}^n[ t_{ij}^2 b_{i1}^2-2b_{i1}t_{ij}(y_{ij}-\beta_0-\beta_1 t_{ij}-b_{i0})]}{2\sigma^2}-\frac{b_{i1}^2}{2\alpha_1}\right\} \nonumber \\
+&=& \text{exp}\left \{ -\frac{(\sigma^2+\alpha_1 \sum_{j=1}^n t_{ij}^2)b_{i1}^2 - 2b_{i1}\alpha_1  \sum_{j=1}^n t_{ij}(y_{ij}-\beta_0-\beta_1 t_{ij}-b_{i0})}{2\alpha_1 \sigma^2}\right\} \nonumber \\
+&\sim& N\left (\frac{\alpha_1 \sum_{j=1}^n t_{ij}(y_{ij}-\beta_0-\beta_1 t_{ij}-b_{i0})}{\sigma^2+\alpha_1 \sum_{j=1}^n t_{ij}^2} , \frac{\alpha_1 \sigma^2}{\sigma^2+\alpha_1 \sum_{j=1}^n t_{ij}^2} \right) \nonumber
+\end{eqnarray}
+
+The full conditional distribution of $b_{i1}$ follows a normal distribution, i.e.
+
+$$
+b_{i1}|y_i, \beta_0, \beta_1, b_{i0}, \sigma^2, \alpha_1 \sim N\left (\frac{\alpha_1 \sum_{j=1}^n t_{ij}(y_{ij}-\beta_0-\beta_1 t_{ij}-b_{i0})}{\sigma^2+\alpha_1 \sum_{j=1}^n t_{ij}^2} , \frac{\alpha_1 \sigma^2}{\sigma^2+\alpha_1 \sum_{j=1}^n t_{ij}^2} \right)
+$$
+
+Based on these full conditional distributions, we can conduct a Gibbs sampling here:
+
+```{r}
+# function for sum of day and reaction time for each subject
+sum_y_day_sub <- function(y = dat[,1], day = dat[, 2], b_1) {
+  a <- vector()
+  for (i in 1:(dim(dat)[1]/10)) {
+    a[i] = sum(y[(10*i-9):(10*i)] * day[(10*i-9):(10*i)])
+  }
+  add = sum(b_1 * a)
+  return(add)
+}
+
+sum_y_sub <- function(y = dat[, 1], b_0) {
+  a <- vector()
+  for (i in 1:(dim(dat)[1]/10)) {
+    a[i] = sum(y[(10*i-9):(10*i)])
+  }
+  add2 = sum(b_0 * a)
+  return(add2)
+}
+
+```
+
+
+```{r}
+gibbs_Q1 <- function(nsim = 10000, burn = 0.1, # chain parameters
+                     seed = 1998,
+                     y = dat[, 1], 
+                     day = dat[, 2]) {
+
+  set.seed(1998)
+  # initialization----------------------------------
+  nsim1 <- nsim * (1 + burn)
+  burni <- nsim * burn
+  
+  m <- 18 # number of subjects
+  n <- 10 # number of days for each subject
+  
+  beta_0 <- 0
+  beta_0.ch <- vector()
+  beta_1 <- 0
+  beta_1.ch <- vector()
+  sigma_sq <- 1
+  sigma_sq.ch <- vector()
+  alpha_0 <- 1
+  alpha_0.ch <- vector()
+  alpha_1 <- 1
+  alpha_1.ch <- vector()
+  b_0 <- matrix(data = rep(0, m), nrow = 1)
+  b_0.ch <- matrix(data = NA, nrow = nsim, ncol = m)
+  b_1 <- matrix(data = rep(0, m), nrow = 1)
+  b_1.ch <- matrix(data = NA, nrow = nsim, ncol = m)
+  
+  for (i in 1:nsim1) {
+  # beta_0
+    beta0_var <- 100 * sigma_sq / (sigma_sq + 100 * m * n)
+    beta0_mean <- 100 * (sum(y) - beta_1 * sum(day) - n * sum(b_0) 
+                         - sum(day[1:10]) * sum(b_1))/ (sigma_sq + 100 * m * n)
+    beta_0 <- rnorm(1, mean = beta0_mean, sd = sqrt(beta0_var))
+    
+  # beta_1
+    beta1_var <- 100 * sigma_sq / (sigma_sq + 100 * sum(day^2))
+    beta1_mean <- 100 * (sum(day * y) - beta_0 * sum(day) 
+                         - sum(day[1:10]) * sum(b_0) 
+                         - sum((day[1:10])^2) * sum(b_1)) / 
+      (sigma_sq + 100 * sum(day^2))
+    beta_1 <- rnorm(1, mean = beta1_mean, sd = sqrt(beta1_var))
+    
+  # alpha_0
+    a0_shape <- m / 2 + 1
+    a0_scale <- sum(b_0^2) / 2 + 1
+    alpha_0 <- rinvgamma(1, shape = a0_shape, scale = a0_scale)
+    
+  # alpha_1
+    a1_shape <- m / 2 + 1
+    a1_scale <- sum(b_1^2) / 2 + 1
+    alpha_1 <- rinvgamma(1, shape = a1_shape, scale = a1_scale)
+  
+  # sigma_sq
+    sigma_sq_shape <- 0.01 + m * n / 2
+    sigma_sq_rate <- (0.02 + sum(y^2) - 2*beta_0*sum(y) - 2*beta_1*sum(day*y)
+                      - 2*sum_y_sub(y, b_0) 
+                      - 2*sum_y_day_sub(y, day, b_1) + m*n*beta_0^2 
+                      + 2*beta_0*beta_1*sum(day) + 2*beta_0*n*sum(b_0) 
+                      + 2*beta_0*sum(day[1:10])*sum(b_1)
+                      + (beta_1^2)*sum(day^2)
+                      + 2*beta_1*sum(day[1:10])*sum(b_0)
+                      + 2*beta_1*sum((day[1:10])^2)*sum(b_1)
+                      + n*sum((b_0)^2)
+                      + 2*sum(day[1:10])*sum(b_0*b_1)
+                      + sum((b_1)^2)*sum((day[1:10])^2)
+                      ) / 2
+    sigma_sq <- rinvgamma(1, shape = sigma_sq_shape, scale = sigma_sq_rate)
+    
+  # b_0
+    for (j in 1:m) {
+      b_0j_var <- alpha_0 * sigma_sq / (sigma_sq + n * alpha_0)
+      b_0j_mean <- alpha_0 * (sum(y[(10 * j - 9):(10 * j)]) 
+                              - n*beta_0 
+                              - beta_1*sum(day[(10 * j - 9):(10 * j)]) 
+                              - b_1[j]*sum(day[(10 * j - 9):(10 * j)])) /
+        (sigma_sq + n * alpha_0)
+      b_0[j] <- rnorm(1, mean = b_0j_mean, sd = sqrt(b_0j_var))
+  # b_1
+      b_1j_var <- alpha_1 * sigma_sq / (sigma_sq + alpha_1 * sum(day^2))
+      b_1j_mean <- alpha_1 * (sum(y[(10 * j - 9):(10 * j)] 
+                                  * day[(10 * j - 9):(10 * j)])
+                              - beta_0 * sum(day[(10 * j - 9):(10 * j)])
+                              - beta_1 * sum((day[(10 * j - 9):(10 * j)])^2) 
+                              - b_0[j] * sum(day[(10 * j - 9):(10 * j)])) /
+        (sigma_sq + alpha_1 * sum(day^2))
+      b_1[j] <- rnorm(1, mean = b_1j_mean, sd = sqrt(b_1j_var))
+    }
+    
+     # Store Chain after burn-----------------------------------------------
+    if (i > burni) {
+      i1 <- i - burni
+      beta_0.ch[i1] <- beta_0
+      beta_1.ch[i1] <- beta_1
+      alpha_0.ch[i1] <- alpha_0
+      alpha_1.ch[i1] <- alpha_1
+      sigma_sq.ch[i1] <- sigma_sq
+      b_0.ch[i1, ] <- b_0
+      b_1.ch[i1, ] <- b_1
+    }
+  
+  }
+  return(list(beta0 = beta_0.ch, beta1 = beta_1.ch,
+              alpha0 = alpha_0.ch, alpha1 = alpha_1.ch,
+              sigmasq = sigma_sq.ch))
+}
+```
+
+```{r}
+gibbs <- gibbs_Q1(nsim = 30000, burn = 0.3, seed = 123)
+```
+
+
+```{r}
+par(mfrow = c(2, 3))
+plot(1:30000, gibbs$beta0, ylab = expression(beta[0]), type = "l")
+plot(1:30000, gibbs$beta1, ylab = expression(beta[1]), type = "l")
+plot(1:30000, gibbs$alpha0, ylab = expression(alpha[0]), type = "l")
+plot(1:30000, gibbs$alpha1, ylab = expression(alpha[1]), type = "l")
+plot(1:30000, gibbs$sigmasq, ylab = expression(sigma^{2}), type = "l")
+```
+
+```{r}
+par(mfrow = c(2, 3))
+acf(gibbs$beta0, main = expression(beta[0]))
+acf(gibbs$beta1, main = expression(beta[1]))
+acf(gibbs$alpha0, main = expression(alpha[0]))
+acf(gibbs$alpha1, main = expression(alpha[1]))
+acf(gibbs$sigmasq, main = expression(sigma^{2}))
+```
+
+(2) Implement an HMC sampler for MCMC simulation for the posterior distribution in (1). Compare all
+posterior summaries with the estimates obtained using Gibbs sampling.
